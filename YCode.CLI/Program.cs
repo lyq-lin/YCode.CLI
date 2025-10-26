@@ -5,9 +5,10 @@ using System.ClientModel;
 using System.ComponentModel;
 using YCode.CLI;
 
-var key = Environment.GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN")!;
-var uri = "https://api.deepseek.com";
-var model = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL")!;
+//var uri = "https://api.deepseek.com";
+var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
+var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
+var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
 
 var WORKDIR = Directory.GetCurrentDirectory();
 

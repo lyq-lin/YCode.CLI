@@ -130,12 +130,14 @@ dotnet tool uninstall --global YCode.CLI
 1. **设置环境变量**
    ```bash
    # Windows
-   set ANTHROPIC_AUTH_TOKEN=your_api_key
-   set ANTHROPIC_MODEL=your_model_name
+   set YCODE_AUTH_TOKEN=your_api_key
+   set YCODE_API_BASE_URI=https://api.deepseek.com
+   set YCODE_MODEL=your_model_name
 
    # Linux/macOS
-   export ANTHROPIC_AUTH_TOKEN=your_api_key
-   export ANTHROPIC_MODEL=your_model_name
+   export YCODE_AUTH_TOKEN=your_api_key
+   export YCODE_API_BASE_URI=https://api.deepseek.com
+   export YCODE_MODEL=your_model_name
    ```
 
 2. **启动YCode**
@@ -151,6 +153,15 @@ dotnet tool uninstall --global YCode.CLI
 ### 使用示例
 
 ```
+# 设置环境变量
+set YCODE_AUTH_TOKEN=your_deepseek_api_key
+set YCODE_API_BASE_URI=https://api.deepseek.com
+set YCODE_MODEL=deepseek-chat
+
+# 启动工具
+ycode
+
+# 在交互界面中使用
 > user: 帮我创建一个简单的控制台应用
 
 ⏺ Write(file_path=> Program.cs, content=> ...)
