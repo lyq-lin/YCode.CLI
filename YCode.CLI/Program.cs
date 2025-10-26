@@ -5,10 +5,15 @@ using System.ClientModel;
 using System.ComponentModel;
 using YCode.CLI;
 
-//var uri = "https://api.deepseek.com";
+#if DEBUG
+var key = Environment.GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN")!;
+var uri = "https://api.deepseek.com";
+var model = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL")!;
+#else
 var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
 var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
 var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
+#endif
 
 var WORKDIR = Directory.GetCurrentDirectory();
 
@@ -71,6 +76,23 @@ var AGENT_STATE = new Dictionary<string, int>()
 
 var todo = new TodoManager();
 
+var skills = new SkillsManager("skills");
+
+if (skills.Skills.Count > 0)
+{
+    var sks = string.Join("\n", skills.Skills.Select(m => $"- {m.Name}: {m.Description}"));
+
+    SYSTEM += $"""
+    {Environment.NewLine}
+    Skills:
+        - Only skill names + one-line desc are visible now.
+        - Need details? Call skill_read(name) to load SKILL.md.
+        - Never preload entire skills; load on demand.
+    """;
+
+    SYSTEM += $"{Environment.NewLine} Available Skills: \n{sks}";
+}
+
 var agent = new OpenAIClient(
     new ApiKeyCredential(key),
     new OpenAIClientOptions()
@@ -78,7 +100,9 @@ var agent = new OpenAIClient(
         Endpoint = new Uri(uri),
 
     }).GetChatClient(model)
-    .CreateAIAgent(instructions: SYSTEM, tools: [.. mcps, AIFunctionFactory.Create(RunTodoUpdate)]);
+    .CreateAIAgent(
+    instructions: SYSTEM,
+    tools: [.. mcps, AIFunctionFactory.Create(RunTodoUpdate), AIFunctionFactory.Create(skills.ReadSkill)]);
 
 var thread = agent.GetNewThread();
 
