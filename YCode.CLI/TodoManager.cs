@@ -119,6 +119,5 @@
                 return $"→ {todo["content"]}";
             return $"○ {todo["content"]}";
         }
-
     }
 }

@@ -64,11 +64,17 @@ namespace YCode.BLog.Controllers
                 .Distinct()
                 .ToListAsync();
 
-            ViewBag.Tags = await _context.BlogPosts
+            // Get all tags from published posts
+            var allTags = await _context.BlogPosts
                 .Where(p => p.IsPublished)
-                .SelectMany(p => p.Tags)
-                .Distinct()
+                .Select(p => p.Tags)
                 .ToListAsync();
+            
+            ViewBag.Tags = allTags
+                .SelectMany(tags => tags)
+                .Where(tag => !string.IsNullOrEmpty(tag))
+                .Distinct()
+                .ToList();
 
             return View(posts);
         }
@@ -85,12 +91,26 @@ namespace YCode.BLog.Controllers
             post.ViewCount++;
             await _context.SaveChangesAsync();
 
-            ViewBag.RelatedPosts = await _context.BlogPosts
-                .Where(p => p.IsPublished && p.Id != id &&
-                           (p.Category == post.Category || p.Tags.Any(t => post.Tags.Contains(t))))
+            // Get related posts by category first
+            var relatedPosts = await _context.BlogPosts
+                .Where(p => p.IsPublished && p.Id != id && p.Category == post.Category)
                 .OrderByDescending(p => p.CreatedAt)
                 .Take(3)
                 .ToListAsync();
+
+            // If not enough related posts by category, add some by shared tags
+            if (relatedPosts.Count < 3)
+            {
+                var additionalPosts = await _context.BlogPosts
+                    .Where(p => p.IsPublished && p.Id != id && p.Category != post.Category)
+                    .OrderByDescending(p => p.CreatedAt)
+                    .Take(3 - relatedPosts.Count)
+                    .ToListAsync();
+                
+                relatedPosts.AddRange(additionalPosts);
+            }
+
+            ViewBag.RelatedPosts = relatedPosts;
 
             return View(post);
         }
@@ -108,12 +128,26 @@ namespace YCode.BLog.Controllers
             post.ViewCount++;
             await _context.SaveChangesAsync();
 
-            ViewBag.RelatedPosts = await _context.BlogPosts
-                .Where(p => p.IsPublished && p.Id != post.Id &&
-                           (p.Category == post.Category || p.Tags.Any(t => post.Tags.Contains(t))))
+            // Get related posts by category first
+            var relatedPosts = await _context.BlogPosts
+                .Where(p => p.IsPublished && p.Id != post.Id && p.Category == post.Category)
                 .OrderByDescending(p => p.CreatedAt)
                 .Take(3)
                 .ToListAsync();
+
+            // If not enough related posts by category, add some by shared tags
+            if (relatedPosts.Count < 3)
+            {
+                var additionalPosts = await _context.BlogPosts
+                    .Where(p => p.IsPublished && p.Id != post.Id && p.Category != post.Category)
+                    .OrderByDescending(p => p.CreatedAt)
+                    .Take(3 - relatedPosts.Count)
+                    .ToListAsync();
+                
+                relatedPosts.AddRange(additionalPosts);
+            }
+
+            ViewBag.RelatedPosts = relatedPosts;
 
             return View("Post", post);
         }
