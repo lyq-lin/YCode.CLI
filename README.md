@@ -67,22 +67,86 @@ public string Update(List<Dictionary<string, object>> inputItems)
 1. **MCP文件系统工具** - 通过 `npx @modelcontextprotocol/server-filesystem` 提供文件操作能力
 2. **自定义Todo工具** - 通过 `RunTodoUpdate` 函数提供任务管理
 
-## 快速开始
+## 安装和使用
 
 ### 环境要求
 - .NET 10.0 SDK
 - Node.js (用于MCP文件系统服务器)
 
-### 运行项目
+### 方法一：从源代码安装
+
+1. **克隆项目**
+   ```bash
+   git clone https://github.com/your-username/YCode.CLI.git
+   cd YCode.CLI
+   ```
+
+2. **构建和打包**
+   ```bash
+   dotnet build
+   dotnet pack
+   ```
+
+3. **安装为全局工具**
+   ```bash
+   dotnet tool install --global --add-source ./YCode.CLI/nupkg YCode.CLI
+   ```
+
+### 方法二：从NuGet安装（如果发布到NuGet）
 
 ```bash
-# 设置环境变量
-set ANTHROPIC_AUTH_TOKEN=your_api_key
-set ANTHROPIC_MODEL=your_model_name
-
-# 构建并运行
-dotnet run
+dotnet tool install --global YCode.CLI
 ```
+
+### 验证安装
+
+安装完成后，验证工具是否正确安装：
+
+```bash
+# 查看已安装的工具
+dotnet tool list --global
+
+# 应该能看到类似输出：
+# Package Id      Version      Commands
+# ------------------------------------
+# ycode.cli       1.0.0        ycode
+
+# 测试运行
+ycode --help
+```
+
+### 更新和卸载
+
+```bash
+# 更新工具
+dotnet tool update --global YCode.CLI
+
+# 卸载工具
+dotnet tool uninstall --global YCode.CLI
+```
+
+### 使用方法
+
+1. **设置环境变量**
+   ```bash
+   # Windows
+   set ANTHROPIC_AUTH_TOKEN=your_api_key
+   set ANTHROPIC_MODEL=your_model_name
+
+   # Linux/macOS
+   export ANTHROPIC_AUTH_TOKEN=your_api_key
+   export ANTHROPIC_MODEL=your_model_name
+   ```
+
+2. **启动YCode**
+   ```bash
+   ycode
+   ```
+
+3. **在交互界面中使用**
+   ```
+   > user: 帮我创建一个控制台应用
+   ```
 
 ### 使用示例
 
