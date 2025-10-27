@@ -4,7 +4,10 @@ using OpenAI;
 using Spectre.Console;
 using System.ClientModel;
 using System.ComponentModel;
+using System.Text;
 using YCode.CLI;
+
+Console.OutputEncoding = Encoding.UTF8;
 
 var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
 var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
@@ -78,12 +81,21 @@ var agent = new OpenAIClient(
 
 var thread = agent.GetNewThread();
 
-Clear();
+try
+{
+    Clear();
+}
+catch (IOException)
+{
+    // 如果无法清除控制台，继续执行
+}
 
 Banner();
 
 AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{WORKDIR}[/]");
 AnsiConsole.MarkupLine("[dim]Type \"exit\" or \"quit\" to leave.[/]");
+
+var spinner = new Spinner("Response...");
 
 while (true)
 {
@@ -117,8 +129,12 @@ while (true)
         string? currentToolName = null;
         bool isFirstTool = true;
 
+        spinner.Start();
+
         await foreach (var resp in agent.RunStreamingAsync(request, thread))
         {
+            spinner.Stop();
+
             foreach (var content in resp.Contents)
             {
                 switch (content)
@@ -172,7 +188,7 @@ while (true)
                             if (currentToolName != null)
                             {
                                 HideToolSpinner();
-                                AnsiConsole.MarkupLine($"[green]>[/] [dim]{currentToolName} completed[/]");
+                                AnsiConsole.MarkupLine($"[bold green]✓[/] [bold cyan]{currentToolName}[/] [dim]completed successfully[/]");
                                 currentToolName = null;
                             }
 
@@ -199,6 +215,8 @@ while (true)
         EnsureContextBlock(NAG_REMINDER);
     }
 }
+
+spinner.Dispose();
 
 [Description("Update the shared todo list (pending | in_progress | completed).")]
 string RunTodoUpdate([Description("""
@@ -272,29 +290,47 @@ void Banner()
     var topBorder = "╭" + new string('─', bannerWidth - 2) + "╮";
     AnsiConsole.MarkupLine($"[dim]{topBorder}[/]");
 
+    // 空行
+    var emptyLine = "│" + new string(' ', bannerWidth - 2) + "│";
+    AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
+
+    // 标题行
     var titleText = "YCode v1.0.0";
     var titlePadding = (bannerWidth - 2 - titleText.Length) / 2;
     var titleLine = "│" + new string(' ', titlePadding) + $"[bold cyan]{titleText}[/]" + new string(' ', bannerWidth - 2 - titlePadding - titleText.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{titleLine}[/]");
 
+    // 欢迎信息
     var welcomeText = "Welcome back!";
     var welcomePadding = (bannerWidth - 2 - welcomeText.Length) / 2;
     var welcomeLine = "│" + new string(' ', welcomePadding) + $"[bold yellow]{welcomeText}[/]" + new string(' ', bannerWidth - 2 - welcomePadding - welcomeText.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{welcomeLine}[/]");
 
+    // 空行
+    AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
+
+    // YCode.CLI文本
     var ycodeText1 = "YCode.CLI";
     var ycodePadding = (bannerWidth - 2 - ycodeText1.Length) / 2;
     var ycodeLine1 = "│" + new string(' ', ycodePadding) + $"[bold green]{ycodeText1}[/]" + new string(' ', bannerWidth - 2 - ycodePadding - ycodeText1.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{ycodeLine1}[/]");
 
+    // 空行
+    AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
+
+    // 模型信息
     var modelText = $"{model} · {uri}";
     var modelPadding = (bannerWidth - 2 - modelText.Length) / 2;
     var modelLine = "│" + new string(' ', modelPadding) + $"[dim]{modelText}[/]" + new string(' ', bannerWidth - 2 - modelPadding - modelText.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{modelLine}[/]");
 
+    // 工作目录
     var workdirPadding = (bannerWidth - 2 - WORKDIR.Length) / 2;
     var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{WORKDIR}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - WORKDIR.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{workdirLine}[/]");
+
+    // 空行
+    AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
 
     // 底部边框
     var bottomBorder = "╰" + new string('─', bannerWidth - 2) + "╯";
@@ -319,7 +355,7 @@ void PrettyToolLine(string kind, string title)
 {
     var body = title != null ? $"{kind}({EscapeMarkup(title)})" : kind;
 
-    AnsiConsole.MarkupLine($"[purple bold]> {body}[/] [dim]...[/]");
+    AnsiConsole.MarkupLine($"[bold magenta]⚡[/] [bold purple]{body}[/] [dim yellow]executing...[/]");
 }
 
 void PrettySubLine(string text)
@@ -338,7 +374,7 @@ void PrettySubLine(string text)
         {
             // 转义特殊字符，防止AnsiConsole解析错误
             var escapedLine = EscapeMarkup(line);
-            AnsiConsole.MarkupLine($"[dim]    | {escapedLine}[/]");
+            AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine}[/]");
         }
     }
     else
@@ -346,9 +382,9 @@ void PrettySubLine(string text)
         // 如果内容很多，折叠显示
         var escapedLine1 = EscapeMarkup(lines[0]);
         var escapedLine2 = EscapeMarkup(lines[1]);
-        AnsiConsole.MarkupLine($"[dim]    | {escapedLine1}[/]");
-        AnsiConsole.MarkupLine($"[dim]    | {escapedLine2}[/]");
-        AnsiConsole.MarkupLine($"[dim yellow]    | ... and {lines.Length - 2} more lines (collapsed)[/]");
+        AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine1}[/]");
+        AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine2}[/]");
+        AnsiConsole.MarkupLine($"[dim]┃[/] [bold yellow]... and {lines.Length - 2} more lines (collapsed)[/]");
     }
 }
 
@@ -383,6 +419,105 @@ void ShowToolSpinner(string toolName)
 void HideToolSpinner()
 {
     Console.Write("\r" + new string(' ', 80) + "\r");
+}
+
+public class Spinner : IDisposable
+{
+    private readonly string _label;
+    private readonly string[] _frames;
+    private readonly string _color;
+    private readonly CancellationTokenSource _cancellationTokenSource;
+    private Task? _task;
+    private bool _isRunning;
+
+    public Spinner(string label = "Waiting for model")
+    {
+        _label = label;
+        _frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        _color = "\x1b[38;2;255;229;92m"; // RGB 颜色
+        _cancellationTokenSource = new CancellationTokenSource();
+        _isRunning = false;
+    }
+
+    public void Start()
+    {
+        // 检查是否是终端
+        if (!Console.IsOutputRedirected && _task == null)
+        {
+            _isRunning = true;
+            _task = Task.Run(Spin, _cancellationTokenSource.Token);
+        }
+    }
+
+    public void Stop()
+    {
+        if (!_isRunning || _task == null) return;
+
+        _cancellationTokenSource.Cancel();
+
+        try
+        {
+            _task.Wait(TimeSpan.FromSeconds(1));
+        }
+        catch (AggregateException)
+        {
+            // 任务取消异常是预期的
+        }
+        finally
+        {
+            _task = null;
+            _isRunning = false;
+
+            // 清理控制台行
+            try
+            {
+                Console.Write("\r\x1b[2K"); // 回车 + 清除整行
+                Console.Out.Flush();
+            }
+            catch (Exception)
+            {
+                // 忽略清理时的异常
+            }
+        }
+    }
+
+    private void Spin()
+    {
+        var startTime = DateTime.Now;
+        var index = 0;
+
+        while (!_cancellationTokenSource.Token.IsCancellationRequested)
+        {
+            try
+            {
+                var elapsed = (DateTime.Now - startTime).TotalSeconds;
+                var frame = _frames[index % _frames.Length];
+                var styled = $"{_color}{frame} {_label} ({elapsed:F1}s)\x1b[0m";
+
+                Console.Write("\r" + styled);
+                Console.Out.Flush();
+
+                index++;
+                Thread.Sleep(80); // 0.08秒
+            }
+            catch (OperationCanceledException)
+            {
+                // 任务被取消，正常退出
+                break;
+            }
+            catch (Exception)
+            {
+                // 其他异常，退出循环
+                break;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        Stop();
+        _cancellationTokenSource?.Dispose();
+    }
 }
 
 #endregion
