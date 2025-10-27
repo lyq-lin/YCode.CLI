@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.AI;
-using ModelContextProtocol.Client;
 using OpenAI;
 using Spectre.Console;
 using System.ClientModel;
@@ -43,17 +42,6 @@ var NAG_REMINDER = $"""
     '</reminder>'
 """;
 
-var mcpTransport = new StdioClientTransport(new StdioClientTransportOptions()
-{
-    Name = "filesystem",
-    Command = "npx",
-    Arguments = ["-y", "@modelcontextprotocol/server-filesystem", WORKDIR],
-});
-
-var mcpClient = await McpClient.CreateAsync(mcpTransport);
-
-var mcps = await mcpClient.ListToolsAsync();
-
 var PENDING_CONTEXT_BLOCKS = new List<ChatMessage>()
 {
     new ChatMessage()
@@ -70,6 +58,10 @@ var AGENT_STATE = new Dictionary<string, int>()
 
 var todo = new TodoManager();
 
+var mcp = new McpManager(WORKDIR);
+
+var tools = await mcp.Regist(RunTodoUpdate);
+
 var agent = new OpenAIClient(
     new ApiKeyCredential(key),
     new OpenAIClientOptions()
@@ -77,7 +69,7 @@ var agent = new OpenAIClient(
         Endpoint = new Uri(uri),
 
     }).GetChatClient(model)
-    .CreateAIAgent(instructions: SYSTEM, tools: [.. mcps, AIFunctionFactory.Create(RunTodoUpdate)]);
+    .CreateAIAgent(instructions: SYSTEM, tools: tools);
 
 var thread = agent.GetNewThread();
 
