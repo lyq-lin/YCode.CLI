@@ -120,6 +120,7 @@ while (true)
         var tools_uses = new List<FunctionResultContent>();
         string? currentToolName = null;
         bool isFirstTool = true;
+        DateTime? toolStartTime = null;
 
         spinner.Start();
 
@@ -165,6 +166,7 @@ while (true)
                                 isFirstTool = false;
 
                                 currentToolName = call.Name;
+                                toolStartTime = DateTime.Now;
                                 PrettyToolLine(call.Name, arguments != null ? String.Join(", ", arguments) : String.Empty);
 
                                 // 显示Spinner
@@ -180,8 +182,15 @@ while (true)
                             if (currentToolName != null)
                             {
                                 HideToolSpinner();
-                                AnsiConsole.MarkupLine($"[bold green]✓[/] [bold cyan]{currentToolName}[/] [dim]completed successfully[/]");
+
+                                // 计算耗时
+                                var elapsed = toolStartTime.HasValue
+                                    ? (DateTime.Now - toolStartTime.Value).TotalSeconds
+                                    : 0;
+
+                                AnsiConsole.MarkupLine($"[bold green]✓[/] [bold cyan]{currentToolName}[/] [dim]completed in {elapsed:F3}s[/]");
                                 currentToolName = null;
+                                toolStartTime = null;
                             }
 
                             // 安全地处理结果
