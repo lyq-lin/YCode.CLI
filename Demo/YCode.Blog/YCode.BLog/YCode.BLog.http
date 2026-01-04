@@ -1,6 +1,0 @@
-@YCode.BLog_HostAddress = http://localhost:5135
-
-GET {{YCode.BLog_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
