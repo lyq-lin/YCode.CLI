@@ -19,10 +19,17 @@
 		<PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-preview.251016.1" />
 		<PackageReference Include="ModelContextProtocol" Version="0.4.0-preview.3" />
 		<PackageReference Include="Spectre.Console" Version="0.53.0" />
+		<PackageReference Include="YamlDotNet" Version="16.3.0" />
 	</ItemGroup>
 
 	<ItemGroup>
 	  <Folder Include="nupkg\" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+		<Content Include="skills\**">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
 	</ItemGroup>
 
 </Project>

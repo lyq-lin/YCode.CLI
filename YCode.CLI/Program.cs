@@ -15,6 +15,8 @@ var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
 
 var WORKDIR = Directory.GetCurrentDirectory();
 
+var SKILLDIR = Path.Combine(WORKDIR, "skills");
+
 var AGENTS = new Dictionary<string, JsonObject>()
 {
     ["explore"] = new JsonObject
@@ -44,23 +46,6 @@ var AGENT_ICONS = new Dictionary<string, (string icon, string color)>()
     ["code"] = ("💻", "green"),
     ["plan"] = ("📋", "yellow")
 };
-
-var SYSTEM = $"""
-    "You are a coding agent operating INSIDE the user's repository at {WORKDIR}.\n"
-    "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
-    "Rules:\n"
-    "- Prefer taking actions with tools (read/write/edit/bash) over long prose.\n"
-    "- Keep outputs terse. Use bullet lists / checklists when summarizing.\n"
-    "- Use Task tool for subtasks that need focused exploration or implementation.\n"
-    "- Never invent file paths. Ask via reads or list directories first if unsure.\n"
-    "- For edits, apply the smallest change that satisfies the request.\n"
-    "- For bash, avoid destructive or privileged commands; stay inside the workspace.\n"
-    "- Use the Todo tool to maintain multi-step plans when needed.\n"
-    "- After finishing, summarize what changed and how to run or test."
-
-    "Task:\n"
-    {GetAgentDescription()}
-""";
 
 var INITIAL_REMINDER = $"""
     '<reminder source="system" topic="todos">'
@@ -95,10 +80,34 @@ var todo = new TodoManager();
 
 var mcp = new McpManager(WORKDIR);
 
+var skills = new SkillsManager(SKILLDIR);
+
+var SYSTEM = $"""
+    "You are a coding agent operating INSIDE the user's repository at {WORKDIR}.\n"
+    "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
+    "Rules:\n"
+    "- Prefer taking actions with tools (read/write/edit/bash) over long prose.\n"
+    "- Keep outputs terse. Use bullet lists / checklists when summarizing.\n"
+    "- Use Skill tool IMMEDIATELY when a task matches a skill description.\n"
+    "- Use Task tool for subtasks that need focused exploration or implementation.\n"
+    "- Never invent file paths. Ask via reads or list directories first if unsure.\n"
+    "- For edits, apply the smallest change that satisfies the request.\n"
+    "- For bash, avoid destructive or privileged commands; stay inside the workspace.\n"
+    "- Use the Todo tool to maintain multi-step plans when needed.\n"
+    "- After finishing, summarize what changed and how to run or test."
+
+    "Task:\n"
+    {GetAgentDescription()}
+
+    "Skills available (invoke with Skill tool when task matches)::\n"
+    {skills.GetDescription()}
+""";
+
 var tools = await mcp.Regist(
     (RunTodoUpdate, "TodoWriter", null),
     (RunToTask, "Task", $$"""
-    {"name": "Task", 
+    {
+       "name": "Task", 
        "description": "Spawn a subagent for a focused subtask. Subagents run in ISOLATED context - they don't see parent's history. Use this to keep the main conversation clean. \n Agent types: \n {{GetAgentDescription()}} \n Example uses:\n - Task(explore): \"Find all files using the auth module.\"\n - Task(plan): \"Design a migration strategy for the database\"\n - Task(code): \"Implement the user registration form\"\n ",
        "arguments": {
        "type": "object",
@@ -108,6 +117,19 @@ var tools = await mcp.Regist(
            "agent_type": { "type": "string", "enum": [], "description": "Type of agent to spawn" },
        },
        "required": ["description", "prompt", "agent_type"],
+       }
+    }
+    """),
+    (RunToSkill, "Skill", $$"""
+    {
+       "name": "Skill", 
+       "description": "Load a skill to gain specialized knowledge for a task. Available skills: \n {{skills.GetDescription()}} \n When to use:\n - IMMEDIATELY when user task matches a skill description.\n - Before attempting domain-specific work. (PDF, MCP, etc.)\n The skill content will be injected into the conversation, giving you detailed instructions and access to resources.",
+       "arguments": {
+       "type": "object",
+       "properties": {
+           "skill": { "type": "string", "description": "Name of the skill to load." },
+       },
+       "required": ["skill"],
        }
     }
     """));
@@ -413,6 +435,26 @@ async Task<string> RunToTask(string description, string prompt, string agentType
     return "(subagent returned no text)";
 }
 
+string RunToSkill(string skillName)
+{
+    var content = skills.GetSkillContent(skillName);
+
+    if (String.IsNullOrWhiteSpace(content))
+    {
+        var available = String.Join(',', skills.GetSkills()) ?? "none";
+
+        return $"Error: Unknown skill '{skillName}'. Available: {available}";
+    }
+
+    return $"""
+        <skill-loaded name="{skillName}">
+        {content}
+        </skill-loaded>
+
+        Follow the instructions in the skill above to complete the user's task.
+        """;
+}
+
 string GetAgentDescription()
 {
     return String.Join("\n", AGENTS.Select(x => $"- {x.Key}: {x.Value["description"]}"));
@@ -597,7 +639,6 @@ string EscapeMarkup(string text)
         .Replace("[", "[[")
         .Replace("]", "]]");
 }
-
 
 void ShowToolSpinner(string toolName)
 {
