@@ -6,7 +6,7 @@ namespace YCode.CLI
     internal class McpManager
     {
         private readonly string _workdir;
-        private readonly List<AITool> _tools;
+        private readonly Dictionary<string, List<AITool>> _tools;
 
         public McpManager(string workdir)
         {
@@ -15,7 +15,7 @@ namespace YCode.CLI
             _workdir = workdir;
         }
 
-        public async Task<AITool[]> Regist(params Delegate[] methods)
+        public async Task<AITool[]> Regist(params (Delegate @delegate, string? name, string? description)[] methods)
         {
             if (_tools.Count == 0)
             {
@@ -41,20 +41,40 @@ namespace YCode.CLI
 
                 var bashes = await bashClient.ListToolsAsync();
 
-                _tools.AddRange(files.Concat(bashes));
+                if (files.Count > 0)
+                {
+                    _tools.TryAdd("file-system", [.. files]);
+                }
+
+                if (bashes.Count > 0)
+                {
+                    _tools.TryAdd("bash", [.. bashes]);
+                }
             }
 
             foreach (var method in methods)
             {
-                _tools.Add(AIFunctionFactory.Create(method));
+                if (_tools.TryGetValue("bulletin", out var tools))
+                {
+                    tools.Add(AIFunctionFactory.Create(method.@delegate, method.name, method.description));
+                }
+                else
+                {
+                    _tools.Add("bulletin", [AIFunctionFactory.Create(method.@delegate, method.name, method.description)]);
+                }
             }
 
             return [.. this.GetTools()];
         }
 
-        public List<AITool> GetTools()
+        public AITool[] GetTools()
         {
-            return _tools;
+            return [.. _tools.SelectMany(x => x.Value)];
+        }
+
+        public AITool[] GetTools(Func<AITool, bool> filter)
+        {
+            return [.. _tools.SelectMany(x => x.Value).Where(filter)];
         }
     }
 }

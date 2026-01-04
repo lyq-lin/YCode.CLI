@@ -4,6 +4,7 @@ using Spectre.Console;
 using System.ClientModel;
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json.Nodes;
 using YCode.CLI;
 
 Console.OutputEncoding = Encoding.UTF8;
@@ -14,17 +15,43 @@ var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
 
 var WORKDIR = Directory.GetCurrentDirectory();
 
+var AGENTS = new Dictionary<string, JsonObject>()
+{
+    ["explore"] = new JsonObject
+    {
+        ["description"] = "Read-only agent for exploring code, finding files, searching",
+        ["tools"] = new JsonArray("bash", "read_file"),
+        ["prompt"] = "You are an exploration agent. Search and analyze, but never modify files. Return a concise summary.",
+    },
+    ["code"] = new JsonObject
+    {
+        ["description"] = "Full agent for implementing features and fixing bugs",
+        ["tools"] = "*",
+        ["prompt"] = "You are a coding agent. Implement the requested changes efficiently.",
+    },
+    ["plan"] = new JsonObject
+    {
+        ["description"] = "Planning agent for designing implementation strategies",
+        ["tools"] = new JsonArray("bash", "read_file"),
+        ["prompt"] = "You are a planning agent. Analyze the codebase and output a numbered implementation plan. Do NOT make changes.",
+    }
+};
+
 var SYSTEM = $"""
     "You are a coding agent operating INSIDE the user's repository at {WORKDIR}.\n"
     "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
     "Rules:\n"
     "- Prefer taking actions with tools (read/write/edit/bash) over long prose.\n"
     "- Keep outputs terse. Use bullet lists / checklists when summarizing.\n"
+    "- Use Task tool for subtasks that need focused exploration or implementation.\n"
     "- Never invent file paths. Ask via reads or list directories first if unsure.\n"
     "- For edits, apply the smallest change that satisfies the request.\n"
     "- For bash, avoid destructive or privileged commands; stay inside the workspace.\n"
     "- Use the Todo tool to maintain multi-step plans when needed.\n"
     "- After finishing, summarize what changed and how to run or test."
+
+    "Task:\n"
+    {GetAgentDescription()}
 """;
 
 var INITIAL_REMINDER = $"""
@@ -60,7 +87,22 @@ var todo = new TodoManager();
 
 var mcp = new McpManager(WORKDIR);
 
-var tools = await mcp.Regist(RunTodoUpdate);
+var tools = await mcp.Regist(
+    (RunTodoUpdate, "TodoWriter", null),
+    (RunToTask, "Task", $$"""
+    {"name": "Task", 
+       "description": "Spawn a subagent for a focused subtask. Subagents run in ISOLATED context - they don't see parent's history. Use this to keep the main conversation clean. \n Agent types: \n {{GetAgentDescription()}} \n Example uses:\n - Task(explore): \"Find all files using the auth module.\"\n - Task(plan): \"Design a migration strategy for the database\"\n - Task(code): \"Implement the user registration form\"\n ",
+       "arguments": {
+       "type": "object",
+       "properties": {
+           "description": { "type": "string", "description": "Short task name (3-5 words) for progress display" },
+           "prompt": { "type": "string", "description": "Detailed instructions for the subagent" },
+           "agent_type": { "type": "string", "enum": [], "description": "Type of agent to spawn" },
+       },
+       "required": ["description", "prompt", "agent_type"],
+       }
+    }
+    """));
 
 var agent = new OpenAIClient(
     new ApiKeyCredential(key),
@@ -219,24 +261,30 @@ while (true)
 
 spinner.Dispose();
 
-[Description("Update the shared todo list (pending | in_progress | completed).")]
-string RunTodoUpdate([Description("""
-"items": {
-    "type": "array",
-    "items": {
-        "type": "object",
-        "properties": {
-            "id": {"type": "string"},
-            "content": {"type": "string"},
-            "activeForm": {"type": "string"},
-            "status": {"type": "string", "enum": list("pending", "in_progress", "completed")},
-        },
-        "required": ["content", "activeForm", "status"],
-        "additionalProperties": False,
-    },
-    "maxItems": 20,
-}
-""")] List<Dictionary<string, object>> items)
+[Description("""
+    {
+        "name": "TodoWriter",
+        "description": "Update the shared todo list (pending | in_progress | completed).",
+        "arguments": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string" },
+                        "content": {"type": "string" },
+                        "activeForm": {"type": "string" },
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed"] },
+                    },
+                    "required": ["content", "activeForm", "status"],
+                    "additionalProperties": false,
+                },
+                "maxItems": 20
+            }
+        }
+    }
+    """)]
+string RunTodoUpdate(List<Dictionary<string, object>> items)
 {
     try
     {
@@ -263,6 +311,145 @@ string RunTodoUpdate([Description("""
     {
         return $"Error updating todos: {ex.Message}";
     }
+}
+
+async Task<string> RunToTask(string description, string prompt, string agentType)
+{
+    if (!AGENTS.ContainsKey(agentType))
+    {
+        throw new NotSupportedException($"Agent type '{agentType}' is not supported.");
+    }
+
+    var config = AGENTS[agentType];
+
+    var sub_system = $"""
+        You are a {agentType} subagent operating INSIDE the user's repository at {WORKDIR}.\n
+
+        {config["prompt"]}
+
+        Complete the task and return a clear, concise summary.
+        """;
+
+    var sub_tools = GetToolsForAgent(agentType);
+
+    var sub_messages = new List<ChatMessage>()
+    {
+        new ChatMessage()
+        {
+            Role = ChatRole.User,
+            Contents = [new TextContent(prompt)]
+        }
+    };
+
+    var sub_agent = new OpenAIClient(
+        new ApiKeyCredential(key),
+        new OpenAIClientOptions()
+        {
+            Endpoint = new Uri(uri),
+
+        }).GetChatClient(model)
+        .CreateAIAgent(sub_system, tools: sub_tools);
+
+    Console.WriteLine($"    [{agentType}] {description}");
+
+    var start = DateTime.Now;
+
+    var sub_tools_use = new List<FunctionResultContent>();
+
+    var next = String.Empty;
+
+    try
+    {
+        await foreach (var resp in sub_agent.RunStreamingAsync(sub_messages))
+        {
+            foreach (var content in resp.Contents)
+            {
+                switch (content)
+                {
+                    case TextContent text:
+                        {
+                            next += text.Text;
+                        }
+                        break;
+                    case FunctionResultContent result:
+                        {
+                            next += $"<previous_tool_use id='{result.CallId}'>{result.Result}</previous_tool_use>";
+
+                            sub_tools_use.Add(result);
+
+                            Console.WriteLine($"    [{agentType}] {description} ... {sub_tools_use.Count} tools, {DateTime.Now - start}");
+                        }
+                        break;
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error: {ex.Message}");
+    }
+
+    sub_messages.Add(new ChatMessage(ChatRole.Assistant, next));
+
+    Console.WriteLine($"    [{agentType}] {description} - done ({sub_tools_use.Count} tools, {DateTime.Now - start}s)");
+
+    if (!String.IsNullOrWhiteSpace(next))
+    {
+        return next;
+    }
+
+    return "(subagent returned no text)";
+}
+
+string GetAgentDescription()
+{
+    return String.Join("\n", AGENTS.Select(x => $"- {x.Key}: {x.Value["description"]}"));
+}
+
+AITool[] GetToolsForAgent(string agentType)
+{
+    if (AGENTS.TryGetValue(agentType, out var meta))
+    {
+        if (meta.TryGetPropertyValue("tools", out var tools))
+        {
+            if (tools?.ToString() == "*")
+            {
+                return mcp.GetTools();
+            }
+            else if (tools is JsonArray toolArray)
+            {
+                var selectedTools = new List<AITool>();
+
+                foreach (var toolNameNode in toolArray)
+                {
+                    var toolName = toolNameNode?.ToString();
+
+                    if (toolName != null)
+                    {
+                        AITool[] tool = [];
+
+                        if (toolName == "bash")
+                        {
+                            tool = mcp.GetTools(x => x.Name is "run" or "run_background" or "kill_background" or "list_background");
+                        }
+                        else
+                        {
+                            tool = mcp.GetTools(x => x.Name == toolName);
+                        }
+
+                        if (tool.Length > 0)
+                        {
+                            selectedTools.AddRange(tool);
+                        }
+                    }
+                }
+
+                return [.. selectedTools];
+            }
+        }
+    }
+
+    throw new NotSupportedException($"Agent type '{agentType}' is not supported.");
 }
 
 #region Console
