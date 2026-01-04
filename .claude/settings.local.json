@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(export:*)",
+      "Bash(timeout 5 dotnet run:*)",
+      "WebSearch",
+      "WebFetch(domain:spectreconsole.net)",
+      "Bash(find:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

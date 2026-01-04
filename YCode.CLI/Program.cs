@@ -37,6 +37,14 @@ var AGENTS = new Dictionary<string, JsonObject>()
     }
 };
 
+// Agent类型到图标和颜色的映射
+var AGENT_ICONS = new Dictionary<string, (string icon, string color)>()
+{
+    ["explore"] = ("🔍", "blue"),
+    ["code"] = ("💻", "green"),
+    ["plan"] = ("📋", "yellow")
+};
+
 var SYSTEM = $"""
     "You are a coding agent operating INSIDE the user's repository at {WORKDIR}.\n"
     "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
@@ -230,7 +238,7 @@ while (true)
                                     ? (DateTime.Now - toolStartTime.Value).TotalSeconds
                                     : 0;
 
-                                AnsiConsole.MarkupLine($"[bold green]✓[/] [bold cyan]{currentToolName}[/] [dim]completed in {elapsed:F3}s[/]");
+                                AnsiConsole.MarkupLine($"[bold green]✓[/] [bold cyan]{currentToolName}[/] [dim]completed in {elapsed:F1}s[/]");
                                 currentToolName = null;
                                 toolStartTime = null;
                             }
@@ -350,7 +358,11 @@ async Task<string> RunToTask(string description, string prompt, string agentType
         }).GetChatClient(model)
         .CreateAIAgent(sub_system, tools: sub_tools);
 
-    Console.WriteLine($"    [{agentType}] {description}");
+    var (icon, color) = AGENT_ICONS.TryGetValue(agentType, out var agentIcon)
+        ? agentIcon
+        : ("🔧", "gray");
+
+    AnsiConsole.MarkupLine($"[dim]    [/][bold {color}]{icon} [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)}");
 
     var start = DateTime.Now;
 
@@ -377,7 +389,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
 
                             sub_tools_use.Add(result);
 
-                            Console.WriteLine($"    [{agentType}] {description} ... {sub_tools_use.Count} tools, {DateTime.Now - start}");
+                            AnsiConsole.MarkupLine($"[dim]    [/][bold {color}]{icon} [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} ... [dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/]");
                         }
                         break;
                 }
@@ -391,7 +403,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
 
     sub_messages.Add(new ChatMessage(ChatRole.Assistant, next));
 
-    Console.WriteLine($"    [{agentType}] {description} - done ({sub_tools_use.Count} tools, {DateTime.Now - start}s)");
+    AnsiConsole.MarkupLine($"[dim]    [/][bold {color}]✓ [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} - done ([dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/])");
 
     if (!String.IsNullOrWhiteSpace(next))
     {
@@ -541,7 +553,7 @@ void EnsureContextBlock(string text)
 
 void PrettyToolLine(string kind, string title)
 {
-    var body = title != null ? $"{kind}({EscapeMarkup(title)})" : kind;
+    var body = title != null ? $"{EscapeMarkup(kind)}({EscapeMarkup(title)})" : EscapeMarkup(kind);
 
     AnsiConsole.MarkupLine($"[bold magenta]⚡[/] [bold purple]{body}[/] [dim yellow]executing...[/]");
 }
@@ -551,28 +563,15 @@ void PrettySubLine(string text)
     if (string.IsNullOrEmpty(text))
         return;
 
-    // 先处理转义的换行符 \\n
+    // 处理转义的换行符 \\n
     var processedText = text.Replace("\\n", "\n");
     var lines = processedText.Split("\n");
 
-    if (lines.Length <= 3)
+    // 显示所有行
+    foreach (var line in lines)
     {
-        // 如果内容很少，直接显示
-        foreach (var line in lines)
-        {
-            // 转义特殊字符，防止AnsiConsole解析错误
-            var escapedLine = EscapeMarkup(line);
-            AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine}[/]");
-        }
-    }
-    else
-    {
-        // 如果内容很多，折叠显示
-        var escapedLine1 = EscapeMarkup(lines[0]);
-        var escapedLine2 = EscapeMarkup(lines[1]);
-        AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine1}[/]");
-        AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine2}[/]");
-        AnsiConsole.MarkupLine($"[dim]┃[/] [bold yellow]... and {lines.Length - 2} more lines (collapsed)[/]");
+        var escapedLine = EscapeMarkup(line);
+        AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine}[/]");
     }
 }
 
@@ -599,9 +598,10 @@ string EscapeMarkup(string text)
         .Replace("]", "]]");
 }
 
+
 void ShowToolSpinner(string toolName)
 {
-    AnsiConsole.Markup($"[yellow]>[/] [dim]{toolName} executing...[/] ");
+    AnsiConsole.Markup($"[yellow]>[/] [dim]{EscapeMarkup(toolName)} executing...[/] ");
 }
 
 void HideToolSpinner()
