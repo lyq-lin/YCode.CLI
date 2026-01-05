@@ -1,0 +1,19 @@
+name: AI Code Review
+
+# 触发条件：当有新的Pull Request创建时
+on: [pull_request]
+
+jobs:
+  # 定义一个名为 “review” 的任务
+  review:
+    # 任务在最新版的Ubuntu系统上运行
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第一步：获取你的代码
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      # 第二步：打印一条信息，证明工作流成功运行了
+      - name: Say Hello (Placeholder for AI)
+        run: echo "🎉 AI代码审查流程已触发！这里未来将集成真正的AI服务。"
