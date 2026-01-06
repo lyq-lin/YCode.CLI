@@ -99,7 +99,7 @@ var SYSTEM = $"""
     "Task:\n"
     {GetAgentDescription()}
 
-    "Skills available (invoke with Skill tool when task matches)::\n"
+    "Skills available (invoke with Skill tool when task matches):\n"
     {skills.GetDescription()}
 """;
 
