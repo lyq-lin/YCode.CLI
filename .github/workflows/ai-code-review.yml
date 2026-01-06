@@ -1,4 +1,4 @@
-name: Codacy Review & Auto Merge with Email
+name: AI Review & Rebase Merge
 
 on:
   pull_request:
@@ -9,104 +9,115 @@ permissions:
   pull-requests: write
 
 jobs:
-  codacy-analysis:
+  analyze:
     runs-on: ubuntu-latest
-    outputs: # 定义此任务的输出，供其他任务使用
-      result: ${{ steps.check_result.outputs.result }}
+    outputs:
+      analysis_result: ${{ steps.evaluate.outputs.result }}
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Run Codacy Analysis
-        id: codacy_analysis # 为步骤添加ID，便于引用其状态
-        continue-on-error: true # 即使Codacy检查失败，也让工作流继续执行
+        id: codacy_scan
+        continue-on-error: true
         uses: codacy/codacy-analysis-cli-action@v4
         with:
           project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
           verbose: true
 
-      - name: Evaluate Codacy Result
-        id: check_result
+      - name: Evaluate Result
+        id: evaluate
         run: |
-          # 根据上一步Codacy分析的结果进行判断
-          if [ "${{ steps.codacy_analysis.outcome }}" = "success" ]; then
-            echo "Codacy分析通过"
-            echo "result=pass" >> $GITHUB_OUTPUT
+          if [ "${{ steps.codacy_scan.outcome }}" = "success" ]; then
+            echo "Codacy检查通过"
+            echo "result=success" >> $GITHUB_OUTPUT
           else
-            echo "Codacy分析未通过"
-            echo "result=fail" >> $GITHUB_OUTPUT
+            echo "Codacy检查发现问题"
+            echo "result=failure" >> $GITHUB_OUTPUT
           fi
 
   auto-merge:
     runs-on: ubuntu-latest
-    needs: [codacy-analysis]
-    if: needs.codacy-analysis.outputs.result == 'pass'
+    needs: [analyze]
+    # 仅在Codacy分析成功时，才尝试自动合并
+    if: needs.analyze.outputs.analysis_result == 'success'
     steps:
-      - name: Auto Merge Pull Request
+      - name: Auto Merge PR (using Rebase)
+        id: merge_step
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.pulls.merge({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-              merge_method: 'merge'
-            })
-            console.log(`PR #${context.issue.number} 已自动合并。`)
+            try {
+              const response = await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                merge_method: 'rebase'  # 使用变基合并，保持主线整洁
+              });
+              console.log('✅ PR 已通过变基合并。');
+              return response;
+            } catch (error) {
+              // 如果合并失败（如冲突），将错误信息打印到日志，并抛出错误使步骤失败
+              console.error('❌ 自动合并失败，原因：', error.message);
+              throw error;
+            }
 
-  notify-by-email: # 关键任务：发送邮件
+  notify-and-handle-failure:
     runs-on: ubuntu-latest
-    needs: [codacy-analysis]
-    if: needs.codacy-analysis.outputs.result == 'fail'
+    needs: [analyze, auto-merge]
+    # 核心逻辑：如果分析失败 或 自动合并失败，则执行此任务发送邮件
+    if: needs.analyze.result == 'failure' || needs.auto-merge.result == 'failure'
     steps:
-      - name: Send Failure Email via SMTP
+      - name: Send Failure Notification Email
         uses: dawidd6/action-send-mail@v3
         with:
-          # 邮件服务器配置 (以Gmail为例)
           server_address: smtp.gmail.com
           server_port: 465
-          # ！！！务必在GitHub Secrets中配置以下两项！！！
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          # 收件人：自动获取PR提交者的邮箱
           to: ${{ github.event.pull_request.user.email }}
-          # 邮件主题
+          from: GitHub Actions Bot <${{ secrets.MAIL_USERNAME }}>
           subject: |
-            [Codacy审查] PR #${{ github.event.pull_request.number }} 未通过自动代码检查
-          # 邮件正文
+            [重要] PR #${{ github.event.pull_request.number }} 自动处理未完成
           html: true
           body: |
-            <p>你好，${{ github.event.pull_request.user.login }}：</p>
-            <p>你在仓库 <strong>${{ github.repository }}</strong> 提交的 Pull Request <strong>#${{ github.event.pull_request.number }}</strong> 未能通过 Codacy 自动代码质量检查。</p>
-            <p><strong>PR标题</strong>：${{ github.event.pull_request.title }}</p>
-            <p><strong>问题详情</strong>：请登录 Codacy 或查看 GitHub PR 页面上的 Codacy 检查结果，了解具体的代码问题和建议。</p>
-            <p><strong>PR链接</strong>：<a href="${{ github.event.pull_request.html_url }}">${{ github.event.pull_request.html_url }}</a></p>
-            <p>请根据 Codacy 的报告修改代码，然后重新推送至当前分支。系统将在你更新后自动重新运行检查。</p>
-            <hr/>
-            <p><em>此邮件由 GitHub Actions 工作流自动发送，请勿回复。</em></p>
-          # 发件人信息 (可选，但建议设置)
-          from: GitHub Actions Bot <${{ secrets.MAIL_USERNAME }}>
-          # 安全连接设置
+            <p>你好 <strong>${{ github.event.pull_request.user.login }}</strong>，</p>
+
+            <p>你的 Pull Request <a href="${{ github.event.pull_request.html_url }}"><strong>#${{ github.event.pull_request.number }}</strong></a> 在自动处理过程中遇到问题，需要你检查处理。</p>
+
+            <p><strong>📝 详细信息</strong><br>
+            仓库：<code>${{ github.repository }}</code><br>
+            PR标题：${{ github.event.pull_request.title }}</p>
+
+            <p><strong>⚠️ 可能的原因及操作指引：</strong></p>
+            <ul>
+            <li><strong>Codacy 代码质量检查未通过</strong>：请查看 PR 页面上的 Codacy 检查报告，根据提示修改代码。</li>
+            <li><strong>存在合并冲突</strong>：你的分支与主分支 (<code>main</code>) 存在冲突，需要你手动解决。</li>
+            </ul>
+
+            <p>请访问 <a href="${{ github.event.pull_request.html_url }}">PR 页面</a> 查看详细状态并处理。处理完成后，重新推送代码即可触发新一轮自动化检查。</p>
+            <hr>
+            <p><em>此邮件由 GitHub Actions 工作流自动发送，请勿直接回复。</em></p>
           secure: true
 
   cleanup:
     runs-on: ubuntu-latest
-    needs: [codacy-analysis]
+    needs: [analyze, auto-merge]
     if: always()
     steps:
-      - name: Delete Source Branch
-        if: github.event.pull_request.merged == true || github.event.action == 'closed'
+      - name: Delete Source Branch (if merged)
+        # 仅在PR被合并后才执行删除
+        if: github.event.pull_request.merged == true
         uses: actions/github-script@v7
         with:
           script: |
-            const branchRef = `heads/${{ github.event.pull_request.head.ref }}`;
             try {
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                ref: branchRef
+                ref: `heads/${{ github.event.pull_request.head.ref }}`
               });
-              console.log(`✅ 源分支 ${branchRef} 已删除。`);
+              console.log('✅ 源分支已删除。');
             } catch (error) {
-              console.log(`ℹ️ 提示：${error.message}`);
+              console.log('ℹ️ 分支可能已被删除: ' + error.message);
             }
