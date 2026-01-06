@@ -39,6 +39,8 @@ var AGENTS = new Dictionary<string, JsonObject>()
     }
 };
 
+throw new Exception();
+
 // Agent类型到图标和颜色的映射
 var AGENT_ICONS = new Dictionary<string, (string icon, string color)>()
 {
