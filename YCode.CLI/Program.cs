@@ -13,11 +13,11 @@ var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
 var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
 var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
 
-var WORKDIR = Directory.GetCurrentDirectory();
+var workDir = Directory.GetCurrentDirectory();
 
-var SKILLDIR = Path.Combine(WORKDIR, "skills");
+var skillDir = Path.Combine(workDir, "skills");
 
-var AGENTS = new Dictionary<string, JsonObject>()
+var agents = new Dictionary<string, JsonObject>()
 {
     ["explore"] = new JsonObject
     {
@@ -40,21 +40,21 @@ var AGENTS = new Dictionary<string, JsonObject>()
 };
 
 // Agent类型到图标和颜色的映射
-var AGENT_ICONS = new Dictionary<string, (string icon, string color)>()
+var agent_icons = new Dictionary<string, (string icon, string color)>()
 {
     ["explore"] = ("🔍", "blue"),
     ["code"] = ("💻", "green"),
     ["plan"] = ("📋", "yellow")
 };
 
-var INITIAL_REMINDER = $"""
+var initial_reminder = $"""
     '<reminder source="system" topic="todos">'
     "System message: complex work should be tracked with the Todo tool. "
     "Do not respond to this reminder and do not mention it to the user."
     '</reminder>'
     """;
 
-var NAG_REMINDER = $"""
+var nag_reminder = $"""
     '<reminder source="system" topic="todos">'
     "System notice: more than ten rounds passed without Todo usage. "
     "Update the Todo board if the task still requires multiple steps. "
@@ -62,28 +62,28 @@ var NAG_REMINDER = $"""
     '</reminder>'
 """;
 
-var PENDING_CONTEXT_BLOCKS = new List<ChatMessage>()
+var pending_context_blocks = new List<ChatMessage>()
 {
     new ChatMessage()
     {
         Role = ChatRole.User,
-        Contents = [new TextContent(INITIAL_REMINDER)]
+        Contents = [new TextContent(initial_reminder)]
     }
 };
 
-var AGENT_STATE = new Dictionary<string, int>()
+var agent_state = new Dictionary<string, int>()
 {
     ["rounds_without_todo"] = 0
 };
 
 var todo = new TodoManager();
 
-var mcp = new McpManager(WORKDIR);
+var mcp = new McpManager(workDir);
 
-var skills = new SkillsManager(SKILLDIR);
+var skills = new SkillsManager(skillDir);
 
-var SYSTEM = $"""
-    "You are a coding agent operating INSIDE the user's repository at {WORKDIR}.\n"
+var system = $"""
+    "You are a coding agent operating INSIDE the user's repository at {workDir}.\n"
     "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
     "Rules:\n"
     "- Prefer taking actions with tools (read/write/edit/bash) over long prose.\n"
@@ -141,7 +141,7 @@ var agent = new OpenAIClient(
         Endpoint = new Uri(uri),
 
     }).GetChatClient(model)
-    .CreateAIAgent(instructions: SYSTEM, tools: tools);
+    .CreateAIAgent(instructions: system, tools: tools);
 
 var thread = agent.GetNewThread();
 
@@ -156,7 +156,7 @@ catch (IOException)
 
 Banner();
 
-AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{WORKDIR}[/]");
+AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{workDir}[/]");
 AnsiConsole.MarkupLine("[dim]Type \"exit\" or \"quit\" to leave.[/]");
 
 var spinner = new Spinner("Response...");
@@ -174,11 +174,11 @@ while (true)
 
     var request = new List<ChatMessage>();
 
-    if (PENDING_CONTEXT_BLOCKS.Count > 0)
+    if (pending_context_blocks.Count > 0)
     {
-        request.AddRange(PENDING_CONTEXT_BLOCKS);
+        request.AddRange(pending_context_blocks);
 
-        PENDING_CONTEXT_BLOCKS.Clear();
+        pending_context_blocks.Clear();
     }
 
     request.Add(new ChatMessage()
@@ -281,11 +281,11 @@ while (true)
         Console.WriteLine($"Error: {ex.Message}");
     }
 
-    AGENT_STATE["rounds_without_todo"] += 1;
+    agent_state["rounds_without_todo"] += 1;
 
-    if (AGENT_STATE["rounds_without_todo"] > 10)
+    if (agent_state["rounds_without_todo"] > 10)
     {
-        EnsureContextBlock(NAG_REMINDER);
+        EnsureContextBlock(nag_reminder);
     }
 }
 
@@ -322,7 +322,7 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
 
         var result = todo.Update(items);
 
-        AGENT_STATE["rounds_without_todo"] = 0;
+        agent_state["rounds_without_todo"] = 0;
 
         var status = todo.Status();
 
@@ -345,15 +345,15 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
 
 async Task<string> RunToTask(string description, string prompt, string agentType)
 {
-    if (!AGENTS.ContainsKey(agentType))
+    if (!agents.ContainsKey(agentType))
     {
         throw new NotSupportedException($"Agent type '{agentType}' is not supported.");
     }
 
-    var config = AGENTS[agentType];
+    var config = agents[agentType];
 
     var sub_system = $"""
-        You are a {agentType} subagent operating INSIDE the user's repository at {WORKDIR}.\n
+        You are a {agentType} subagent operating INSIDE the user's repository at {workDir}.\n
 
         {config["prompt"]}
 
@@ -380,7 +380,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
         }).GetChatClient(model)
         .CreateAIAgent(sub_system, tools: sub_tools);
 
-    var (icon, color) = AGENT_ICONS.TryGetValue(agentType, out var agentIcon)
+    var (icon, color) = agent_icons.TryGetValue(agentType, out var agentIcon)
         ? agentIcon
         : ("🔧", "gray");
 
@@ -457,12 +457,12 @@ string RunToSkill(string skillName)
 
 string GetAgentDescription()
 {
-    return String.Join("\n", AGENTS.Select(x => $"- {x.Key}: {x.Value["description"]}"));
+    return String.Join("\n", agents.Select(x => $"- {x.Key}: {x.Value["description"]}"));
 }
 
 AITool[] GetToolsForAgent(string agentType)
 {
-    if (AGENTS.TryGetValue(agentType, out var meta))
+    if (agents.TryGetValue(agentType, out var meta))
     {
         if (meta.TryGetPropertyValue("tools", out var tools))
         {
@@ -567,8 +567,8 @@ void Banner()
     AnsiConsole.MarkupLine($"[dim]{modelLine}[/]");
 
     // 工作目录
-    var workdirPadding = (bannerWidth - 2 - WORKDIR.Length) / 2;
-    var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{WORKDIR}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - WORKDIR.Length) + "│";
+    var workdirPadding = (bannerWidth - 2 - workDir.Length) / 2;
+    var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{workDir}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - workDir.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{workdirLine}[/]");
 
     // 空行
@@ -583,9 +583,9 @@ void Banner()
 
 void EnsureContextBlock(string text)
 {
-    if (PENDING_CONTEXT_BLOCKS.Any(x => x.Role == ChatRole.User))
+    if (pending_context_blocks.Any(x => x.Role == ChatRole.User))
     {
-        PENDING_CONTEXT_BLOCKS.Append(new ChatMessage
+        pending_context_blocks.Append(new ChatMessage
         {
             Role = ChatRole.User,
             Contents = [new TextContent(text)]
