@@ -13,11 +13,11 @@ var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
 var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
 var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
 
-var WORKDIR = Directory.GetCurrentDirectory();
+var workDir = Directory.GetCurrentDirectory();
 
-var SKILLDIR = Path.Combine(WORKDIR, "skills");
+var skillDir = Path.Combine(workDir, "skills");
 
-var AGENTS = new Dictionary<string, JsonObject>()
+var agents = new Dictionary<string, JsonObject>()
 {
     ["explore"] = new JsonObject
     {
@@ -40,21 +40,21 @@ var AGENTS = new Dictionary<string, JsonObject>()
 };
 
 // Agent类型到图标和颜色的映射
-var AGENT_ICONS = new Dictionary<string, (string icon, string color)>()
+var agent_icons = new Dictionary<string, (string icon, string color)>()
 {
     ["explore"] = ("🔍", "blue"),
     ["code"] = ("💻", "green"),
     ["plan"] = ("📋", "yellow")
 };
 
-var INITIAL_REMINDER = $"""
+var initial = $"""
     '<reminder source="system" topic="todos">'
     "System message: complex work should be tracked with the Todo tool. "
     "Do not respond to this reminder and do not mention it to the user."
     '</reminder>'
     """;
 
-var NAG_REMINDER = $"""
+var nag = $"""
     '<reminder source="system" topic="todos">'
     "System notice: more than ten rounds passed without Todo usage. "
     "Update the Todo board if the task still requires multiple steps. "
@@ -62,32 +62,33 @@ var NAG_REMINDER = $"""
     '</reminder>'
 """;
 
-var PENDING_CONTEXT_BLOCKS = new List<ChatMessage>()
+var pendingMsg = new List<ChatMessage>()
 {
     new ChatMessage()
     {
         Role = ChatRole.User,
-        Contents = [new TextContent(INITIAL_REMINDER)]
+        Contents = [new TextContent(initial)]
     }
 };
 
-var AGENT_STATE = new Dictionary<string, int>()
+var agent_state = new Dictionary<string, int>()
 {
     ["rounds_without_todo"] = 0
 };
 
 var todo = new TodoManager();
 
-var mcp = new McpManager(WORKDIR);
+var mcp = new McpManager(workDir);
 
-var skills = new SkillsManager(SKILLDIR);
+var skills = new SkillsManager(skillDir);
 
-var SYSTEM = $"""
-    "You are a coding agent operating INSIDE the user's repository at {WORKDIR}.\n"
+var system = $"""
+    "You are a coding agent operating INSIDE the user's repository at {workDir}.\n"
     "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
     "Rules:\n"
     "- Prefer taking actions with tools (read/write/edit/bash) over long prose.\n"
     "- Keep outputs terse. Use bullet lists / checklists when summarizing.\n"
+    "- Use Ask Tool to clarify requirements. \n"
     "- Use Skill tool IMMEDIATELY when a task matches a skill description.\n"
     "- Use Task tool for subtasks that need focused exploration or implementation.\n"
     "- Never invent file paths. Ask via reads or list directories first if unsure.\n"
@@ -96,15 +97,22 @@ var SYSTEM = $"""
     "- Use the Todo tool to maintain multi-step plans when needed.\n"
     "- After finishing, summarize what changed and how to run or test."
 
+    "HITL Ask:\n"
+    "- You’ve got the tools to interact with users now."
+    "- When you are unsure about the requirements, you can USE the Ask Tool to request the user to provide guidance."
+    "- After completing a task, first ask the user for feedback through the Ask Tool."
+    "- When encountering difficulties, interact with users through the Ask Tool."
+
     "Task:\n"
     {GetAgentDescription()}
 
-    "Skills available (invoke with Skill tool when task matches)::\n"
+    "Skills available (invoke with Skill tool when task matches):\n"
     {skills.GetDescription()}
 """;
 
 var tools = await mcp.Regist(
     (RunTodoUpdate, "TodoWriter", null),
+    (RunToAsk, "Ask", null),
     (RunToTask, "Task", $$"""
     {
        "name": "Task", 
@@ -141,7 +149,7 @@ var agent = new OpenAIClient(
         Endpoint = new Uri(uri),
 
     }).GetChatClient(model)
-    .CreateAIAgent(instructions: SYSTEM, tools: tools);
+    .CreateAIAgent(instructions: system, tools: tools);
 
 var thread = agent.GetNewThread();
 
@@ -156,7 +164,7 @@ catch (IOException)
 
 Banner();
 
-AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{WORKDIR}[/]");
+AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{workDir}[/]");
 AnsiConsole.MarkupLine("[dim]Type \"exit\" or \"quit\" to leave.[/]");
 
 var spinner = new Spinner("Response...");
@@ -174,11 +182,11 @@ while (true)
 
     var request = new List<ChatMessage>();
 
-    if (PENDING_CONTEXT_BLOCKS.Count > 0)
+    if (pendingMsg.Count > 0)
     {
-        request.AddRange(PENDING_CONTEXT_BLOCKS);
+        request.AddRange(pendingMsg);
 
-        PENDING_CONTEXT_BLOCKS.Clear();
+        pendingMsg.Clear();
     }
 
     request.Add(new ChatMessage()
@@ -281,11 +289,11 @@ while (true)
         Console.WriteLine($"Error: {ex.Message}");
     }
 
-    AGENT_STATE["rounds_without_todo"] += 1;
+    agent_state["rounds_without_todo"] += 1;
 
-    if (AGENT_STATE["rounds_without_todo"] > 10)
+    if (agent_state["rounds_without_todo"] > 10)
     {
-        EnsureContextBlock(NAG_REMINDER);
+        EnsureContextBlock(nag);
     }
 }
 
@@ -322,7 +330,7 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
 
         var result = todo.Update(items);
 
-        AGENT_STATE["rounds_without_todo"] = 0;
+        agent_state["rounds_without_todo"] = 0;
 
         var status = todo.Status();
 
@@ -345,15 +353,15 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
 
 async Task<string> RunToTask(string description, string prompt, string agentType)
 {
-    if (!AGENTS.ContainsKey(agentType))
+    if (!agents.ContainsKey(agentType))
     {
         throw new NotSupportedException($"Agent type '{agentType}' is not supported.");
     }
 
-    var config = AGENTS[agentType];
+    var config = agents[agentType];
 
     var sub_system = $"""
-        You are a {agentType} subagent operating INSIDE the user's repository at {WORKDIR}.\n
+        You are a {agentType} subagent operating INSIDE the user's repository at {workDir}.\n
 
         {config["prompt"]}
 
@@ -380,7 +388,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
         }).GetChatClient(model)
         .CreateAIAgent(sub_system, tools: sub_tools);
 
-    var (icon, color) = AGENT_ICONS.TryGetValue(agentType, out var agentIcon)
+    var (icon, color) = agent_icons.TryGetValue(agentType, out var agentIcon)
         ? agentIcon
         : ("🔧", "gray");
 
@@ -455,14 +463,159 @@ string RunToSkill(string skillName)
         """;
 }
 
+[Description("""
+    {
+        "name": "Ask",
+        "description": "Provide three options related to user needs, each sentence consisting of 3-5 words.",
+        "arguments": {
+            "options": {
+                "type": "array",
+                "items": { "type": "string", "description": "An option for the user to choose from." },
+                "maxItems": 3
+            }
+        }
+    }
+    """)]
+string RunToAsk(string[] options)
+{
+    // 创建美观的HITL Ask界面
+    AnsiConsole.WriteLine();
+
+    // 使用Panel包装问题
+    var panel = new Panel("[bold cyan]🤖 HITL Interaction Required[/]")
+    {
+        Border = BoxBorder.Rounded,
+        BorderStyle = new Style(Color.Cyan1),
+        Padding = new Padding(1, 1, 1, 1),
+        Header = new PanelHeader("[yellow]Human-in-the-Loop[/]", Justify.Center)
+    };
+
+    AnsiConsole.Write(panel);
+
+    AnsiConsole.MarkupLine("[dim]Please select an option or choose to input custom text (ESC to cancel):[/]");
+    AnsiConsole.WriteLine();
+
+    string selected;
+    try
+    {
+        // 创建包含"自定义输入"选项的选择列表
+        var allOptions = options.ToList();
+        allOptions.Add("[italic cyan]自定义输入...[/]");
+
+        // 创建选择提示
+        var prompt = new SelectionPrompt<string>()
+            .Title("[bold white]Available options:[/]")
+            .PageSize(Math.Min(10, allOptions.Count))
+            .MoreChoicesText("[grey](Move up and down to reveal more options)[/]")
+            .WrapAround(false)
+            .AddChoices(allOptions);
+
+        selected = AnsiConsole.Prompt(prompt);
+
+        // 检查用户是否选择了"自定义输入"
+        if (selected == "[italic cyan]自定义输入...[/]")
+        {
+            AnsiConsole.WriteLine();
+
+            // 创建美观的自定义输入面板
+            var customPanel = new Panel("[bold yellow]✏️ Custom Text Input[/]")
+            {
+                Border = BoxBorder.Double,
+                BorderStyle = new Style(Color.Yellow1),
+                Padding = new Padding(2, 1, 2, 1),
+                Header = new PanelHeader("[cyan]Enter your own text[/]", Justify.Center)
+            };
+
+            AnsiConsole.Write(customPanel);
+
+            AnsiConsole.MarkupLine("[dim]Type your custom input below (press [bold white]Enter[/] to submit, [bold white]ESC[/] to cancel):[/]");
+            AnsiConsole.WriteLine();
+
+            // 创建更美观的文本输入提示
+            var textPrompt = new TextPrompt<string>("[bold cyan]→[/] [bold white]Your text:[/] ")
+                .PromptStyle("bold white")
+                .ValidationErrorMessage("[red]Input cannot be empty. Please enter some text.[/]")
+                .Validate(input =>
+                {
+                    if (string.IsNullOrWhiteSpace(input))
+                        return ValidationResult.Error("[red]Input cannot be empty[/]");
+
+                    // 输入长度检查（可选）
+                    if (input.Length > 500)
+                        return ValidationResult.Error("[red]Input too long (max 500 characters)[/]");
+
+                    return ValidationResult.Success();
+                });
+
+            try
+            {
+                selected = AnsiConsole.Prompt(textPrompt);
+
+                // 显示成功反馈
+                AnsiConsole.WriteLine();
+                var successPanel = new Panel($"[bold green]{selected}[/]")
+                {
+                    Border = BoxBorder.Rounded,
+                    BorderStyle = new Style(Color.Green1),
+                    Padding = new Padding(1, 1, 1, 1),
+                    Header = new PanelHeader("[bold green]✓ Custom Input Saved[/]", Justify.Left)
+                };
+
+                AnsiConsole.Write(successPanel);
+            }
+            catch (OperationCanceledException)
+            {
+                // 用户在文本输入时按ESC取消
+                AnsiConsole.WriteLine();
+                var cancelPanel = new Panel("[bold yellow]⚠ Input Cancelled[/]")
+                {
+                    Border = BoxBorder.Square,
+                    BorderStyle = new Style(Color.Yellow1),
+                    Padding = new Padding(1, 0, 1, 0),
+                    Header = new PanelHeader("[yellow]Action cancelled[/]", Justify.Center)
+                };
+
+                AnsiConsole.Write(cancelPanel);
+                return $"""
+                    <system-reminder source="system" topic="HITL">
+                     "(cancelled)"
+                    </system-reminder>
+                    """;
+            }
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[green]✓[/] [bold white]Selected:[/] [cyan]{selected}[/]");
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // 用户按ESC取消
+        AnsiConsole.MarkupLine("[yellow]⚠[/] [dim]HITL interaction cancelled by user.[/]");
+        return $"""
+            <system-reminder source="system" topic="HITL">
+             "(cancelled)"
+            </system-reminder>
+            """;
+    }
+
+    AnsiConsole.WriteLine();
+
+    return $"""
+        <system-reminder source="system" topic="HITL">
+         "{selected}"
+        </system-reminder>
+        """;
+}
+
 string GetAgentDescription()
 {
-    return String.Join("\n", AGENTS.Select(x => $"- {x.Key}: {x.Value["description"]}"));
+    return String.Join("\n", agents.Select(x => $"- {x.Key}: {x.Value["description"]}"));
 }
 
 AITool[] GetToolsForAgent(string agentType)
 {
-    if (AGENTS.TryGetValue(agentType, out var meta))
+    if (agents.TryGetValue(agentType, out var meta))
     {
         if (meta.TryGetPropertyValue("tools", out var tools))
         {
@@ -567,8 +720,8 @@ void Banner()
     AnsiConsole.MarkupLine($"[dim]{modelLine}[/]");
 
     // 工作目录
-    var workdirPadding = (bannerWidth - 2 - WORKDIR.Length) / 2;
-    var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{WORKDIR}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - WORKDIR.Length) + "│";
+    var workdirPadding = (bannerWidth - 2 - workDir.Length) / 2;
+    var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{workDir}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - workDir.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{workdirLine}[/]");
 
     // 空行
@@ -583,9 +736,9 @@ void Banner()
 
 void EnsureContextBlock(string text)
 {
-    if (PENDING_CONTEXT_BLOCKS.Any(x => x.Role == ChatRole.User))
+    if (pendingMsg.Any(x => x.Role == ChatRole.User))
     {
-        PENDING_CONTEXT_BLOCKS.Append(new ChatMessage
+        pendingMsg.Append(new ChatMessage
         {
             Role = ChatRole.User,
             Contents = [new TextContent(text)]
@@ -609,11 +762,38 @@ void PrettySubLine(string text)
     var processedText = text.Replace("\\n", "\n");
     var lines = processedText.Split("\n");
 
+    // 检查是否为HITL系统提醒
+    bool isHitlReminder = text.Contains("topic=\"HITL\"") || text.Contains("topic='HITL'");
+
     // 显示所有行
     foreach (var line in lines)
     {
         var escapedLine = EscapeMarkup(line);
-        AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine}[/]");
+
+        if (isHitlReminder)
+        {
+            // HITL提醒使用特殊样式
+            if (line.Contains("<system-reminder") || line.Contains("</system-reminder>"))
+            {
+                // 标签行使用青色
+                AnsiConsole.MarkupLine($"[dim]┃[/] [bold cyan]{escapedLine}[/]");
+            }
+            else if (line.Contains("(cancelled)"))
+            {
+                // 取消状态使用黄色
+                AnsiConsole.MarkupLine($"[dim]┃[/] [bold yellow]{escapedLine}[/]");
+            }
+            else
+            {
+                // 内容使用绿色加粗
+                AnsiConsole.MarkupLine($"[dim]┃[/] [bold green]{escapedLine}[/]");
+            }
+        }
+        else
+        {
+            // 普通文本使用默认样式
+            AnsiConsole.MarkupLine($"[dim]┃[/] [bold white]{escapedLine}[/]");
+        }
     }
 }
 
