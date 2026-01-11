@@ -135,6 +135,9 @@ export YCODE_AUTH_TOKEN=your_api_key
 export YCODE_API_BASE_URI=https://api.deepseek.com
 export YCODE_MODEL=deepseek-chat
 
+# 可选：配置Context7 MCP工具 (Upstash Context7 API)
+export YCODE_CONTEXT7=your_context7_api_key
+
 # 启动交互界面
 ycode
 ```

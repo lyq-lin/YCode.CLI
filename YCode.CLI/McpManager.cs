@@ -50,6 +50,24 @@ namespace YCode.CLI
                 {
                     _tools.TryAdd("bash", [.. bashes]);
                 }
+
+                var context7Key = Environment.GetEnvironmentVariable("YCODE_CONTEXT7");
+
+                if (!String.IsNullOrWhiteSpace(context7Key))
+                {
+                    var context7 = new StdioClientTransport(new StdioClientTransportOptions()
+                    {
+                        Name = "context7",
+                        Command = "npx",
+                        Arguments = ["-y", "@upstash/context7-mcp", "--api-key", context7Key],
+                    });
+
+                    var context7Client = await McpClient.CreateAsync(context7);
+
+                    var context7Tools = await context7Client.ListToolsAsync();
+
+                    _tools.TryAdd("context7", [.. context7Tools]);
+                }
             }
 
             foreach (var method in methods)
