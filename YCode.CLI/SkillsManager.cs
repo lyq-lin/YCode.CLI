@@ -10,9 +10,11 @@ namespace YCode.CLI
         private readonly string _skillsDir;
         private readonly Dictionary<string, JsonObject> _skills;
 
-        public SkillsManager(string skillsDir)
+        public SkillsManager()
         {
-            _skillsDir = skillsDir;
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            
+            _skillsDir = Path.Combine(userProfile, ".ycode", "skills");
 
             _skills = [];
 
@@ -156,3 +158,6 @@ namespace YCode.CLI
         }
     }
 }
+
+
+

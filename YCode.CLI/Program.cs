@@ -15,7 +15,6 @@ var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
 
 var workDir = Directory.GetCurrentDirectory();
 
-var skillDir = Path.Combine(workDir, "skills");
 
 var agents = new Dictionary<string, JsonObject>()
 {
@@ -80,7 +79,7 @@ var todo = new TodoManager();
 
 var mcp = new McpManager(workDir);
 
-var skills = new SkillsManager(skillDir);
+var skills = new SkillsManager();
 
 var system = $"""
     "You are a coding agent operating INSIDE the user's repository at {workDir}.\n"
@@ -750,3 +749,4 @@ public class Spinner : IDisposable
 }
 
 #endregion
+

@@ -364,3 +364,5 @@ FodyWeavers.xsd
 
 # Claude Code
 .claude/
+# AGENTS summary file
+AGENTS.md
