@@ -183,7 +183,7 @@ while (true)
         pending_context_blocks.Clear();
     }
 
-    var memoryBlock = memory.BuildContextBlock();
+    var memoryBlock = memory.BuildContextBlock(input);
 
     if (memoryBlock != null)
     {
