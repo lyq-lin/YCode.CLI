@@ -81,6 +81,8 @@ var mcp = new McpManager(workDir);
 
 var skills = new SkillsManager();
 
+var memory = new MemoryManager();
+
 var system = $"""
     "You are a coding agent operating INSIDE the user's repository at {workDir}.\n"
     "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
@@ -104,6 +106,7 @@ var system = $"""
 
 var tools = await mcp.Regist(
     (RunTodoUpdate, "TodoWriter", null),
+    (RunMemoryUpdate, "MemoryWriter", null),
     (RunToTask, "Task", $$"""
     {
        "name": "Task", 
@@ -178,6 +181,13 @@ while (true)
         request.AddRange(pending_context_blocks);
 
         pending_context_blocks.Clear();
+    }
+
+    var memoryBlock = memory.BuildContextBlock();
+
+    if (memoryBlock != null)
+    {
+        request.Add(memoryBlock);
     }
 
     request.Add(new ChatMessage()
@@ -339,6 +349,35 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
     catch (Exception ex)
     {
         return $"Error updating todos: {ex.Message}";
+    }
+}
+
+[Description("""
+    {
+        "name": "MemoryWriter",
+        "description": "Save long-term memory items (profile or daily).",
+        "arguments": {
+            "type": "object",
+            "properties": {
+                "category": { "type": "string", "enum": ["profile", "daily"] },
+                "content": { "type": "string" },
+                "date": { "type": "string", "description": "YYYY-MM-DD for daily memory (optional)" },
+                "tags": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["category", "content"],
+            "additionalProperties": false
+        }
+    }
+    """)]
+string RunMemoryUpdate(string category, string content, string? date = null, List<string>? tags = null)
+{
+    try
+    {
+        return memory.AddMemory(category, content, date, tags);
+    }
+    catch (Exception ex)
+    {
+        return $"Error updating memory: {ex.Message}";
     }
 }
 
