@@ -72,7 +72,8 @@ var pending_context_blocks = new List<ChatMessage>()
 
 var agent_state = new Dictionary<string, int>()
 {
-    ["rounds_without_todo"] = 0
+    ["rounds_without_todo"] = 0,
+    ["total_rounds"] = 0
 };
 
 var todo = new TodoManager();
@@ -316,7 +317,8 @@ while (true)
     }
 
     agent_state["rounds_without_todo"] += 1;
-    memory.MaybeSaveHeartbeat(input, agent_state["rounds_without_todo"]);
+    agent_state["total_rounds"] += 1;
+    memory.MaybeSaveHeartbeat(input, agent_state["total_rounds"]);
 
     if (agent_state["rounds_without_todo"] > 10)
     {
