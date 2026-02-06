@@ -81,7 +81,7 @@ var mcp = new McpManager(workDir);
 
 var skills = new SkillsManager();
 
-var memory = new MemoryManager();
+var memory = new MemoryManager(workDir);
 
 var system = $"""
     "You are a coding agent operating INSIDE the user's repository at {workDir}.\n"
@@ -107,6 +107,7 @@ var system = $"""
 var tools = await mcp.Regist(
     (RunTodoUpdate, "TodoWriter", null),
     (RunMemoryUpdate, "MemoryWriter", null),
+    (RunMemorySearch, "MemorySearch", null),
     (RunToTask, "Task", $$"""
     {
        "name": "Task", 
@@ -291,6 +292,7 @@ while (true)
     }
 
     agent_state["rounds_without_todo"] += 1;
+    memory.MaybeSaveHeartbeat(input, agent_state["rounds_without_todo"]);
 
     if (agent_state["rounds_without_todo"] > 10)
     {
@@ -355,29 +357,58 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
 [Description("""
     {
         "name": "MemoryWriter",
-        "description": "Save long-term memory items (profile or daily).",
+        "description": "Save long-term memory items (profile, daily, or project).",
         "arguments": {
             "type": "object",
             "properties": {
-                "category": { "type": "string", "enum": ["profile", "daily"] },
+                "category": { "type": "string", "enum": ["profile", "daily", "project"] },
                 "content": { "type": "string" },
                 "date": { "type": "string", "description": "YYYY-MM-DD for daily memory (optional)" },
-                "tags": { "type": "array", "items": { "type": "string" } }
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "project": { "type": "string", "description": "Project key for project memory (optional, defaults to current workspace name)" }
             },
             "required": ["category", "content"],
             "additionalProperties": false
         }
     }
     """)]
-string RunMemoryUpdate(string category, string content, string? date = null, List<string>? tags = null)
+string RunMemoryUpdate(string category, string content, string? date = null, List<string>? tags = null, string? project = null)
 {
     try
     {
-        return memory.AddMemory(category, content, date, tags);
+        return memory.AddMemory(category, content, date, tags, project);
     }
     catch (Exception ex)
     {
         return $"Error updating memory: {ex.Message}";
+    }
+}
+
+
+[Description("""
+    {
+        "name": "MemorySearch",
+        "description": "Search memories across profile, daily, and project scopes.",
+        "arguments": {
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 30 }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        }
+    }
+    """)]
+string RunMemorySearch(string query, int limit = 8)
+{
+    try
+    {
+        return memory.Search(query, limit);
+    }
+    catch (Exception ex)
+    {
+        return $"Error searching memory: {ex.Message}";
     }
 }
 
@@ -788,4 +819,3 @@ public class Spinner : IDisposable
 }
 
 #endregion
-
