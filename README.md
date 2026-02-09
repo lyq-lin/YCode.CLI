@@ -32,28 +32,33 @@
 ```mermaid
 flowchart TD
     UI[CLI UI / Console] --> Core[Program.cs: Orchestrator]
-    Core --> Agents[Subagents: explore / plan / code]
-    Core --> Tools[MCP Tools]
-    Core --> Memory[MemoryManager: profile / daily / project]
-    Core --> Skills[SkillsManager: SKILL.md]
-    Core --> Todo[TodoManager]
+    Core --> DI[ServiceRegistration: Register + Inject]
+    DI --> Managers[Managers]
+    DI --> Tools[IAgentTool implementations]
+    Managers --> AgentMgr[AgentManager: subagent catalog]
+    Managers --> ToolMgr[ToolManager: Register/GetTools]
+    Managers --> MemoryMgr[MemoryManager]
+    Managers --> SkillsMgr[SkillsManager]
+    Managers --> TodoMgr[TodoManager]
+    Managers --> Context[AgentContext]
+    ToolMgr --> MCP[MCP Tools]
+    ToolMgr --> Agent[Agent runtime]
 ```
 
 ## 消息注入流程
 ```mermaid
 flowchart TD
-    Input[User input] --> Queue[Pending context blocks]
-    Queue --> Build["BuildContextBlock"]
+    Input[User input] --> Blocks[AgentContext.PendingContextBlocks]
+    Blocks --> Build[MemoryManager.BuildContextBlock]
     Build --> HasBlock{Context block exists?}
     HasBlock -- Yes --> Attach[Attach context block]
     HasBlock -- No --> Direct[Skip context block]
     Attach --> Msg[Create ChatMessage]
     Direct --> Msg
     Msg --> Send[Send to agent]
-    Send --> Idle[No new context queued]
-    Send --> Later[Next round evaluation]
-    Later --> Window{Reached reminder threshold?}
-    Window -- Yes --> Reminder[Queue reminder]
+    Send --> Update[Update AgentContext state]
+    Update --> Window{Reached reminder threshold?}
+    Window -- Yes --> Reminder[AgentContext.EnsureContextBlock]
     Window -- No --> Idle
 ```
 
