@@ -53,6 +53,15 @@ var nag_reminder = $"""
     '</reminder>'
 """;
 
+var memory_reminder = $"""
+    '<reminder source="system" topic="memory">'
+    "System note: memory tools have not been used across multiple rounds. "
+    "When the user mentions stable preferences, long-term goals, repeated workflows, or project rules, "
+    "write to MemoryWriter. When the user references past info, call MemorySearch before asking again. "
+    "Do not store secrets, one-off tasks, or transient numbers."
+    '</reminder>'
+""";
+
 var pending_context_blocks = new List<ChatMessage>()
 {
     new ChatMessage()
@@ -65,6 +74,7 @@ var pending_context_blocks = new List<ChatMessage>()
 var agent_state = new Dictionary<string, int>()
 {
     ["rounds_without_todo"] = 0,
+    ["last_memory_activity_round"] = 0,
     ["total_rounds"] = 0
 };
 
@@ -310,11 +320,26 @@ while (true)
 
     agent_state["rounds_without_todo"] += 1;
     agent_state["total_rounds"] += 1;
-    memory.MaybeSaveHeartbeat(input, agent_state["total_rounds"]);
+
+    var savedHeartbeat = memory.MaybeSaveHeartbeat(input, agent_state["total_rounds"]);
+
+    if (savedHeartbeat)
+    {
+        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
+    }
 
     if (agent_state["rounds_without_todo"] > 10)
     {
         EnsureContextBlock(nag_reminder);
+    }
+
+    var roundsSinceMemoryActivity = agent_state["total_rounds"] - agent_state["last_memory_activity_round"];
+
+    if (roundsSinceMemoryActivity > 8)
+    {
+        EnsureContextBlock(memory_reminder);
+
+        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
     }
 }
 
@@ -394,6 +419,8 @@ string RunMemoryUpdate(string category, string content, string? date = null, Lis
 {
     try
     {
+        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
+
         return memory.AddMemory(category, content, date, tags, project);
     }
     catch (Exception ex)
@@ -422,6 +449,8 @@ string RunMemorySearch(string query, int limit = 8)
 {
     try
     {
+        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
+
         return memory.Search(query, limit);
     }
     catch (Exception ex)
@@ -666,14 +695,20 @@ void Banner()
 
 void EnsureContextBlock(string text)
 {
-    if (pending_context_blocks.Any(x => x.Role == ChatRole.User))
+    var alreadyQueued = pending_context_blocks.Any(x =>
+        x.Role == ChatRole.User &&
+        x.Contents.OfType<TextContent>().Any(c => c.Text == text));
+
+    if (alreadyQueued)
     {
-        pending_context_blocks.Append(new ChatMessage
-        {
-            Role = ChatRole.User,
-            Contents = [new TextContent(text)]
-        });
+        return;
     }
+
+    pending_context_blocks.Add(new ChatMessage
+    {
+        Role = ChatRole.User,
+        Contents = [new TextContent(text)]
+    });
 }
 
 void PrettyToolLine(string kind, string title)

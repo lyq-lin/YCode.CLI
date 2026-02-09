@@ -208,29 +208,32 @@ namespace YCode.CLI
             return sb.ToString().TrimEnd();
         }
 
-        public void MaybeSaveHeartbeat(string userInput, int roundNumber)
+        public bool MaybeSaveHeartbeat(string userInput, int roundNumber)
         {
             if (string.IsNullOrWhiteSpace(userInput) || userInput.Trim().Length < 12)
             {
-                return;
+                return false;
             }
 
             if (_lastHeartbeatRound >= 0 && roundNumber - _lastHeartbeatRound < 6)
             {
-                return;
+                return false;
             }
 
             var normalized = NormalizeContent(userInput);
             if (normalized == _lastHeartbeatFingerprint)
             {
-                return;
+                return false;
             }
 
             _lastHeartbeatFingerprint = normalized;
             _lastHeartbeatRound = roundNumber;
 
             var compact = CompactText(userInput, 140);
+
             _ = AddMemory("daily", $"Heartbeat: user focus -> {compact}", null, ["heartbeat", "auto"]);
+
+            return true;
         }
 
         public ChatMessage? BuildContextBlock(string? userInput = null, int maxProfile = 20)
