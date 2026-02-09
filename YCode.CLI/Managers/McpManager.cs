@@ -1,6 +1,3 @@
-using Microsoft.Extensions.AI;
-using ModelContextProtocol.Client;
-
 namespace YCode.CLI
 {
     [Inject]
@@ -85,6 +82,7 @@ namespace YCode.CLI
         }
     }
 }
+
 
 
 

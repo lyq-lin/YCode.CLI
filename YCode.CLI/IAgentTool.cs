@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
-
 namespace YCode.CLI
 {
     internal interface IAgentTool
@@ -14,4 +10,5 @@ namespace YCode.CLI
         Delegate Handler { get; }
     }
 }
+
 

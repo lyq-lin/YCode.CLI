@@ -1,11 +1,3 @@
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using OpenAI;
-using Spectre.Console;
-using System.ClientModel;
-using System.Text;
-using YCode.CLI;
-
 Console.OutputEncoding = Encoding.UTF8;
 
 var host = new ServiceCollection();
@@ -84,6 +76,7 @@ var system = $"""
     - Deduplicate before writing memory; keep memory atomic and searchable.
     - When user mentions long-term preference, persist it to `profile`.
     - When a project rule is stated, persist it to `project`.
+    - When tracking progress (development updates or Todo changes), summarize goals and status into `daily` and persist stable milestones or decisions into `project`.
 
     ## Execution rules
     - Never invent file paths; discover first.
@@ -116,9 +109,9 @@ var agent = new OpenAIClient(
         Endpoint = new Uri(config.Uri),
 
     }).GetChatClient(config.Model)
-    .CreateAIAgent(instructions: system, tools: tools);
+    .AsAIAgent(instructions: system, tools: tools);
 
-var thread = agent.GetNewThread();
+var thread = await agent.CreateSessionAsync();
 
 try
 {
@@ -469,3 +462,4 @@ public class Spinner : IDisposable
 }
 
 #endregion
+

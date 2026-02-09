@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.Extensions.AI;
-
 namespace YCode.CLI
 {
     [Inject]
@@ -45,6 +39,7 @@ namespace YCode.CLI
         public AITool[] GetTools(Func<AITool, bool> filter) => _mcp.GetTools(filter);
     }
 }
+
 
 
 

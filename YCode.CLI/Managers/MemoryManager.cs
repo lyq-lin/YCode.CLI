@@ -1,9 +1,3 @@
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using Microsoft.Extensions.AI;
-
 namespace YCode.CLI
 {
     [Inject]
@@ -595,6 +589,7 @@ namespace YCode.CLI
         public List<string>? Tags { get; set; } = [];
     }
 }
+
 
 
 

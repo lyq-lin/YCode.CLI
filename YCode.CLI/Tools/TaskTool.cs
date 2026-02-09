@@ -1,10 +1,3 @@
-using Microsoft.Extensions.AI;
-using OpenAI;
-using Spectre.Console;
-using System;
-using System.ClientModel;
-using System.Text.Json.Nodes;
-
 namespace YCode.CLI
 {
     [Inject<IAgentTool>]
@@ -79,7 +72,7 @@ namespace YCode.CLI
                     Endpoint = new Uri(_config.Uri),
 
                 }).GetChatClient(_config.Model)
-                .CreateAIAgent(sub_system, tools: sub_tools);
+                .AsAIAgent(sub_system, tools: sub_tools);
 
             AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]🤖 [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)}");
 
@@ -189,6 +182,7 @@ namespace YCode.CLI
         }
     }
 }
+
 
 
 
