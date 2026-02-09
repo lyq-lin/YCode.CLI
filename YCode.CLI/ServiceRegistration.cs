@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace YCode.CLI
 {
     internal static class ServiceRegistration
