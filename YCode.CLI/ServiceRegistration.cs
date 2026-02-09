@@ -12,8 +12,16 @@ namespace YCode.CLI
             var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
             var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
             var workDir = Directory.GetCurrentDirectory();
+            var osDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
+            var osPlatform = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
+                ? "Windows"
+                : System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux)
+                    ? "Linux"
+                    : System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX)
+                        ? "macOS"
+                        : "Unknown";
 
-            services.AddSingleton(new AppConfig(key, uri, model, workDir));
+            services.AddSingleton(new AppConfig(key, uri, model, workDir, osPlatform, osDescription));
 
             services.RegisterAttributedServices();
 
@@ -56,7 +64,7 @@ namespace YCode.CLI
         }
     }
 
-    internal sealed record AppConfig(string Key, string Uri, string Model, string WorkDir);
+    internal sealed record AppConfig(string Key, string Uri, string Model, string WorkDir, string OsPlatform, string OsDescription);
 
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
     internal class InjectAttribute : Attribute
