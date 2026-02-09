@@ -1,42 +1,21 @@
-﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using OpenAI;
 using Spectre.Console;
 using System.ClientModel;
-using System.ComponentModel;
 using System.Text;
-using System.Text.Json.Nodes;
 using YCode.CLI;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
-var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
-var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
+var host = new ServiceCollection();
 
-var workDir = Directory.GetCurrentDirectory();
+var provider = host.Register();
 
-
-var agents = new Dictionary<string, JsonObject>()
-{
-    ["explore"] = new JsonObject
-    {
-        ["description"] = "Read-only agent for exploring code, finding files, searching",
-        ["tools"] = new JsonArray("bash", "read_file"),
-        ["prompt"] = "You are an exploration agent. Search and analyze, but never modify files. Return a concise summary.",
-    },
-    ["code"] = new JsonObject
-    {
-        ["description"] = "Full agent for implementing features and fixing bugs",
-        ["tools"] = "*",
-        ["prompt"] = "You are a coding agent. Implement the requested changes efficiently.",
-    },
-    ["plan"] = new JsonObject
-    {
-        ["description"] = "Planning agent for designing implementation strategies",
-        ["tools"] = new JsonArray("bash", "read_file"),
-        ["prompt"] = "You are a planning agent. Analyze the codebase and output a numbered implementation plan. Do NOT make changes.",
-    }
-};
+var toolManager = provider.GetRequiredService<ToolManager>();
+var agentManager = provider.GetRequiredService<AgentManager>();
+var agentContext = provider.GetRequiredService<AgentContext>();
+var config = provider.GetRequiredService<AppConfig>();
 
 var initial_reminder = $"""
     '<reminder source="system" topic="todos">'
@@ -62,32 +41,14 @@ var memory_reminder = $"""
     '</reminder>'
 """;
 
-var pending_context_blocks = new List<ChatMessage>()
-{
-    new ChatMessage()
-    {
-        Role = ChatRole.User,
-        Contents = [new TextContent(initial_reminder)]
-    }
-};
+var skills = provider.GetRequiredService<SkillsManager>();
 
-var agent_state = new Dictionary<string, int>()
-{
-    ["rounds_without_todo"] = 0,
-    ["last_memory_activity_round"] = 0,
-    ["total_rounds"] = 0
-};
+var memory = provider.GetRequiredService<MemoryManager>();
 
-var todo = new TodoManager();
-
-var mcp = new McpManager(workDir);
-
-var skills = new SkillsManager();
-
-var memory = new MemoryManager(workDir);
+agentContext.EnsureContextBlock(initial_reminder);
 
 var system = $"""
-    You are **YCode**, a senior coding agent operating INSIDE the user's repository at: {workDir}
+    You are **YCode**, a senior coding agent operating INSIDE the user's repository at: {config.WorkDir}
 
     ## Core operating mode (ReAct)
     Use this loop on every turn:
@@ -125,52 +86,21 @@ var system = $"""
     - Keep answers short, structured, and test-oriented.
 
     ## Available subAgents
-    {GetAgentDescription()}
+    {agentManager.GetDescription()}
 
     ## Available skills
     {skills.GetDescription()}
 """;
 
-var tools = await mcp.Regist(
-    (RunTodoUpdate, "TodoWriter", null),
-    (RunMemoryUpdate, "MemoryWriter", null),
-    (RunMemorySearch, "MemorySearch", null),
-    (RunToTask, "Task", $$"""
-    {
-       "name": "Task", 
-       "description": "Spawn a subagent for a focused subtask. Subagents run in ISOLATED context - they don't see parent's history. Use this to keep the main conversation clean. \n Agent types: \n {{GetAgentDescription()}} \n Example uses:\n - Task(explore): \"Find all files using the auth module.\"\n - Task(plan): \"Design a migration strategy for the database\"\n - Task(code): \"Implement the user registration form\"\n ",
-       "arguments": {
-       "type": "object",
-       "properties": {
-           "description": { "type": "string", "description": "Short task name (3-5 words) for progress display" },
-           "prompt": { "type": "string", "description": "Detailed instructions for the subagent" },
-           "agent_type": { "type": "string", "enum": [], "description": "Type of agent to spawn" },
-       },
-       "required": ["description", "prompt", "agent_type"],
-       }
-    }
-    """),
-    (RunToSkill, "Skill", $$"""
-    {
-       "name": "Skill", 
-       "description": "Load a skill to gain specialized knowledge for a task. Available skills: \n {{skills.GetDescription()}} \n When to use:\n - IMMEDIATELY when user task matches a skill description.\n - Before attempting domain-specific work. (PDF, MCP, etc.)\n The skill content will be injected into the conversation, giving you detailed instructions and access to resources.",
-       "arguments": {
-       "type": "object",
-       "properties": {
-           "skill": { "type": "string", "description": "Name of the skill to load." },
-       },
-       "required": ["skill"],
-       }
-    }
-    """));
+var tools = await toolManager.Register();
 
 var agent = new OpenAIClient(
-    new ApiKeyCredential(key),
+    new ApiKeyCredential(config.Key),
     new OpenAIClientOptions()
     {
-        Endpoint = new Uri(uri),
+        Endpoint = new Uri(config.Uri),
 
-    }).GetChatClient(model)
+    }).GetChatClient(config.Model)
     .CreateAIAgent(instructions: system, tools: tools);
 
 var thread = agent.GetNewThread();
@@ -180,13 +110,11 @@ try
     Clear();
 }
 catch (IOException)
-{
-    // 如果无法清除控制台，继续执行
-}
+{ }
 
 Banner();
 
-AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{workDir}[/]");
+AnsiConsole.MarkupLine($"[dim]Workspace:[/] [bold cyan]{config.WorkDir}[/]");
 AnsiConsole.MarkupLine("[dim]Type \"exit\" or \"quit\" to leave.[/]");
 
 var spinner = new Spinner("Response...");
@@ -204,11 +132,11 @@ while (true)
 
     var request = new List<ChatMessage>();
 
-    if (pending_context_blocks.Count > 0)
+    if (agentContext.PendingContextBlocks.Count > 0)
     {
-        request.AddRange(pending_context_blocks);
+        request.AddRange(agentContext.PendingContextBlocks);
 
-        pending_context_blocks.Clear();
+        agentContext.PendingContextBlocks.Clear();
     }
 
     var memoryBlock = memory.BuildContextBlock(input);
@@ -250,9 +178,7 @@ while (true)
                         {
                             var arguments = call.Arguments?.Select(x =>
                             {
-                                // 安全地处理参数值
                                 var value = x.Value?.ToString() ?? "null";
-                                // 如果值太长，截断显示
                                 if (value.Length > 50)
                                     value = value.Substring(0, 47) + "...";
                                 return $"{x.Key}=> {value}";
@@ -260,7 +186,6 @@ while (true)
 
                             if (arguments != null)
                             {
-                                // 添加分隔线（除了第一个工具）
                                 if (!isFirstTool)
                                 {
                                     AnsiConsole.WriteLine();
@@ -277,8 +202,6 @@ while (true)
                                 currentToolName = call.Name;
                                 toolStartTime = DateTime.Now;
                                 PrettyToolLine(call.Name, arguments != null ? String.Join(", ", arguments) : String.Empty);
-
-                                // 显示Spinner
                                 ShowToolSpinner(call.Name);
                             }
                         }
@@ -286,13 +209,9 @@ while (true)
                     case FunctionResultContent result:
                         {
                             tools_uses.Add(result);
-
-                            // 清除Spinner状态
                             if (currentToolName != null)
                             {
                                 HideToolSpinner();
-
-                                // 计算耗时
                                 var elapsed = toolStartTime.HasValue
                                     ? (DateTime.Now - toolStartTime.Value).TotalSeconds
                                     : 0;
@@ -301,10 +220,7 @@ while (true)
                                 currentToolName = null;
                                 toolStartTime = null;
                             }
-
-                            // 安全地处理结果
                             var resultText = result.Result?.ToString() ?? String.Empty;
-                            // 如果结果包含JSON对象，进行清理
                             resultText = CleanJsonOutput(resultText);
                             PrettySubLine(resultText);
                         }
@@ -318,308 +234,34 @@ while (true)
         Console.WriteLine($"Error: {ex.Message}");
     }
 
-    agent_state["rounds_without_todo"] += 1;
-    agent_state["total_rounds"] += 1;
+    agentContext.SetInt("rounds_without_todo", agentContext.GetInt("rounds_without_todo") + 1);
+    agentContext.SetInt("total_rounds", agentContext.GetInt("total_rounds") + 1);
 
-    var savedHeartbeat = memory.MaybeSaveHeartbeat(input, agent_state["total_rounds"]);
+    var savedHeartbeat = memory.MaybeSaveHeartbeat(input, agentContext.GetInt("total_rounds"));
 
     if (savedHeartbeat)
     {
-        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
+        agentContext.SetInt("last_memory_activity_round", agentContext.GetInt("total_rounds"));
     }
 
-    if (agent_state["rounds_without_todo"] > 10)
+    if (agentContext.GetInt("rounds_without_todo") > 10)
     {
-        EnsureContextBlock(nag_reminder);
+        agentContext.EnsureContextBlock(nag_reminder);
     }
 
-    var roundsSinceMemoryActivity = agent_state["total_rounds"] - agent_state["last_memory_activity_round"];
+    var roundsSinceMemoryActivity = agentContext.GetInt("total_rounds") - agentContext.GetInt("last_memory_activity_round");
 
     if (roundsSinceMemoryActivity > 8)
     {
-        EnsureContextBlock(memory_reminder);
+        agentContext.EnsureContextBlock(memory_reminder);
 
-        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
+        agentContext.SetInt("last_memory_activity_round", agentContext.GetInt("total_rounds"));
     }
 }
 
 spinner.Dispose();
 
-[Description("""
-    {
-        "name": "TodoWriter",
-        "description": "Update the shared todo list (pending | in_progress | completed).",
-        "arguments": {
-            "items": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string" },
-                        "content": {"type": "string" },
-                        "activeForm": {"type": "string" },
-                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed"] },
-                    },
-                    "required": ["content", "activeForm", "status"],
-                    "additionalProperties": false,
-                },
-                "maxItems": 20
-            }
-        }
-    }
-    """)]
-string RunTodoUpdate(List<Dictionary<string, object>> items)
-{
-    try
-    {
-        var summary = String.Empty;
-
-        var result = todo.Update(items);
-
-        agent_state["rounds_without_todo"] = 0;
-
-        var status = todo.Status();
-
-        if (status["total"] == 0)
-        {
-            summary = "No todos have been created.";
-        }
-        else
-        {
-            summary = $"Status updated: {status["completed"]} completed, {status["in_progress"]} in progress.";
-        }
-
-        return result + $"{Environment.NewLine} {summary}";
-    }
-    catch (Exception ex)
-    {
-        return $"Error updating todos: {ex.Message}";
-    }
-}
-
-[Description("""
-    {
-        "name": "MemoryWriter",
-        "description": "Save long-term memory items (profile, daily, or project).",
-        "arguments": {
-            "type": "object",
-            "properties": {
-                "category": { "type": "string", "enum": ["profile", "daily", "project"] },
-                "content": { "type": "string" },
-                "date": { "type": "string", "description": "YYYY-MM-DD for daily memory (optional)" },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "project": { "type": "string", "description": "Project key for project memory (optional, defaults to current workspace name)" }
-            },
-            "required": ["category", "content"],
-            "additionalProperties": false
-        }
-    }
-    """)]
-string RunMemoryUpdate(string category, string content, string? date = null, List<string>? tags = null, string? project = null)
-{
-    try
-    {
-        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
-
-        return memory.AddMemory(category, content, date, tags, project);
-    }
-    catch (Exception ex)
-    {
-        return $"Error updating memory: {ex.Message}";
-    }
-}
-
-
-[Description("""
-    {
-        "name": "MemorySearch",
-        "description": "Search memories across profile, daily, and project scopes.",
-        "arguments": {
-            "type": "object",
-            "properties": {
-                "query": { "type": "string" },
-                "limit": { "type": "integer", "minimum": 1, "maximum": 30 }
-            },
-            "required": ["query"],
-            "additionalProperties": false
-        }
-    }
-    """)]
-string RunMemorySearch(string query, int limit = 8)
-{
-    try
-    {
-        agent_state["last_memory_activity_round"] = agent_state["total_rounds"];
-
-        return memory.Search(query, limit);
-    }
-    catch (Exception ex)
-    {
-        return $"Error searching memory: {ex.Message}";
-    }
-}
-
-async Task<string> RunToTask(string description, string prompt, string agentType)
-{
-    if (!agents.ContainsKey(agentType))
-    {
-        throw new NotSupportedException($"Agent type '{agentType}' is not supported.");
-    }
-
-    var config = agents[agentType];
-
-    var sub_system = $"""
-        You are a {agentType} subagent operating INSIDE the user's repository at {workDir}.\n
-
-        {config["prompt"]}
-
-        Complete the task and return a clear, concise summary.
-        """;
-
-    var sub_tools = GetToolsForAgent(agentType);
-
-    var sub_messages = new List<ChatMessage>()
-    {
-        new ChatMessage()
-        {
-            Role = ChatRole.User,
-            Contents = [new TextContent(prompt)]
-        }
-    };
-
-    var sub_agent = new OpenAIClient(
-        new ApiKeyCredential(key),
-        new OpenAIClientOptions()
-        {
-            Endpoint = new Uri(uri),
-
-        }).GetChatClient(model)
-        .CreateAIAgent(sub_system, tools: sub_tools);
-
-    AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]🤖 [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)}");
-
-    var start = DateTime.Now;
-
-    var sub_tools_use = new List<FunctionResultContent>();
-
-    var next = String.Empty;
-
-    try
-    {
-        await foreach (var resp in sub_agent.RunStreamingAsync(sub_messages))
-        {
-            foreach (var content in resp.Contents)
-            {
-                switch (content)
-                {
-                    case TextContent text:
-                        {
-                            next += text.Text;
-                        }
-                        break;
-                    case FunctionResultContent result:
-                        {
-                            next += $"<previous_tool_use id='{result.CallId}'>{result.Result}</previous_tool_use>";
-
-                            sub_tools_use.Add(result);
-
-                            AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]🤖 [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} ... [dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/]");
-                        }
-                        break;
-                }
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error: {ex.Message}");
-    }
-
-    sub_messages.Add(new ChatMessage(ChatRole.Assistant, next));
-
-    AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]✓ [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} - done ([dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/])");
-
-    if (!String.IsNullOrWhiteSpace(next))
-    {
-        return next;
-    }
-
-    return "(subagent returned no text)";
-}
-
-string RunToSkill(string skillName)
-{
-    var content = skills.GetSkillContent(skillName);
-
-    if (String.IsNullOrWhiteSpace(content))
-    {
-        var available = String.Join(',', skills.GetSkills()) ?? "none";
-
-        return $"Error: Unknown skill '{skillName}'. Available: {available}";
-    }
-
-    return $"""
-        <skill-loaded name="{skillName}">
-        {content}
-        </skill-loaded>
-
-        Follow the instructions in the skill above to complete the user's task.
-        """;
-}
-
-string GetAgentDescription()
-{
-    return String.Join("\n", agents.Select(x => $"- {x.Key}: {x.Value["description"]}"));
-}
-
-AITool[] GetToolsForAgent(string agentType)
-{
-    if (agents.TryGetValue(agentType, out var meta))
-    {
-        if (meta.TryGetPropertyValue("tools", out var tools))
-        {
-            if (tools?.ToString() == "*")
-            {
-                return mcp.GetTools();
-            }
-            else if (tools is JsonArray toolArray)
-            {
-                var selectedTools = new List<AITool>();
-
-                foreach (var toolNameNode in toolArray)
-                {
-                    var toolName = toolNameNode?.ToString();
-
-                    if (toolName != null)
-                    {
-                        AITool[] tool = [];
-
-                        if (toolName == "bash")
-                        {
-                            tool = mcp.GetTools(x => x.Name is "run" or "run_background" or "kill_background" or "list_background");
-                        }
-                        else
-                        {
-                            tool = mcp.GetTools(x => x.Name == toolName);
-                        }
-
-                        if (tool.Length > 0)
-                        {
-                            selectedTools.AddRange(tool);
-                        }
-                    }
-                }
-
-                return [.. selectedTools];
-            }
-        }
-    }
-
-    throw new NotSupportedException($"Agent type '{agentType}' is not supported.");
-}
-
 #region Console
-
 void Clear()
 {
     Console.Clear();
@@ -635,80 +277,39 @@ void Banner()
     }
     catch (IOException)
     {
-        // 如果无法获取控制台宽度，使用默认值
         consoleWidth = 120;
     }
-    var bannerWidth = Math.Min(consoleWidth, 200); // 限制最大宽度
-
-    // 顶部边框
+    var bannerWidth = Math.Min(consoleWidth, 200);
     var topBorder = "╭" + new string('─', bannerWidth - 2) + "╮";
     AnsiConsole.MarkupLine($"[dim]{topBorder}[/]");
-
-    // 空行
     var emptyLine = "│" + new string(' ', bannerWidth - 2) + "│";
     AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
-
-    // 标题行
     var titleText = "YCode v1.0.0";
     var titlePadding = (bannerWidth - 2 - titleText.Length) / 2;
     var titleLine = "│" + new string(' ', titlePadding) + $"[bold cyan]{titleText}[/]" + new string(' ', bannerWidth - 2 - titlePadding - titleText.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{titleLine}[/]");
-
-    // 欢迎信息
     var welcomeText = "Welcome back!";
     var welcomePadding = (bannerWidth - 2 - welcomeText.Length) / 2;
     var welcomeLine = "│" + new string(' ', welcomePadding) + $"[bold yellow]{welcomeText}[/]" + new string(' ', bannerWidth - 2 - welcomePadding - welcomeText.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{welcomeLine}[/]");
-
-    // 空行
     AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
-
-    // YCode.CLI文本
     var ycodeText1 = "YCode.CLI";
     var ycodePadding = (bannerWidth - 2 - ycodeText1.Length) / 2;
     var ycodeLine1 = "│" + new string(' ', ycodePadding) + $"[bold green]{ycodeText1}[/]" + new string(' ', bannerWidth - 2 - ycodePadding - ycodeText1.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{ycodeLine1}[/]");
-
-    // 空行
     AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
-
-    // 模型信息
-    var modelText = $"{model} · {uri}";
+    var modelText = $"{config.Model} · {config.Uri}";
     var modelPadding = (bannerWidth - 2 - modelText.Length) / 2;
     var modelLine = "│" + new string(' ', modelPadding) + $"[dim]{modelText}[/]" + new string(' ', bannerWidth - 2 - modelPadding - modelText.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{modelLine}[/]");
-
-    // 工作目录
-    var workdirPadding = (bannerWidth - 2 - workDir.Length) / 2;
-    var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{workDir}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - workDir.Length) + "│";
+    var workdirPadding = (bannerWidth - 2 - config.WorkDir.Length) / 2;
+    var workdirLine = "│" + new string(' ', workdirPadding) + $"[dim]{config.WorkDir}[/]" + new string(' ', bannerWidth - 2 - workdirPadding - config.WorkDir.Length) + "│";
     AnsiConsole.MarkupLine($"[dim]{workdirLine}[/]");
-
-    // 空行
     AnsiConsole.MarkupLine($"[dim]{emptyLine}[/]");
-
-    // 底部边框
     var bottomBorder = "╰" + new string('─', bannerWidth - 2) + "╯";
     AnsiConsole.MarkupLine($"[dim]{bottomBorder}[/]");
 
     AnsiConsole.WriteLine();
-}
-
-void EnsureContextBlock(string text)
-{
-    var alreadyQueued = pending_context_blocks.Any(x =>
-        x.Role == ChatRole.User &&
-        x.Contents.OfType<TextContent>().Any(c => c.Text == text));
-
-    if (alreadyQueued)
-    {
-        return;
-    }
-
-    pending_context_blocks.Add(new ChatMessage
-    {
-        Role = ChatRole.User,
-        Contents = [new TextContent(text)]
-    });
 }
 
 void PrettyToolLine(string kind, string title)
@@ -722,12 +323,8 @@ void PrettySubLine(string text)
 {
     if (string.IsNullOrEmpty(text))
         return;
-
-    // 处理转义的换行符 \\n
     var processedText = text.Replace("\\n", "\n");
     var lines = processedText.Split("\n");
-
-    // 显示所有行
     foreach (var line in lines)
     {
         var escapedLine = EscapeMarkup(line);
@@ -739,8 +336,6 @@ string CleanJsonOutput(string text)
 {
     if (string.IsNullOrEmpty(text))
         return text;
-
-    // 移除可能导致AnsiConsole解析错误的特殊字符
     return text
         .Replace("{\"type\":\"text\",\"text\":\"\"}", "")
         .Replace("{\"type\":\"text\",\"text\":\"", "")
@@ -751,8 +346,6 @@ string EscapeMarkup(string text)
 {
     if (string.IsNullOrEmpty(text))
         return text;
-
-    // 转义AnsiConsole的特殊字符
     return text
         .Replace("[", "[[")
         .Replace("]", "]]");
@@ -781,14 +374,13 @@ public class Spinner : IDisposable
     {
         _label = label;
         _frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        _color = "\x1b[38;2;255;229;92m"; // RGB 颜色
+        _color = "\x1b[38;2;255;229;92m";
         _cancellationTokenSource = new CancellationTokenSource();
         _isRunning = false;
     }
 
     public void Start()
     {
-        // 检查是否是终端
         if (!Console.IsOutputRedirected && _task == null)
         {
             _isRunning = true;
@@ -808,22 +400,18 @@ public class Spinner : IDisposable
         }
         catch (AggregateException)
         {
-            // 任务取消异常是预期的
         }
         finally
         {
             _task = null;
             _isRunning = false;
-
-            // 清理控制台行
             try
             {
-                Console.Write("\r\x1b[2K"); // 回车 + 清除整行
+                Console.Write("\r\x1b[2K");
                 Console.Out.Flush();
             }
             catch (Exception)
             {
-                // 忽略清理时的异常
             }
         }
     }
@@ -845,16 +433,14 @@ public class Spinner : IDisposable
                 Console.Out.Flush();
 
                 index++;
-                Thread.Sleep(80); // 0.08秒
+                Thread.Sleep(80);
             }
             catch (OperationCanceledException)
             {
-                // 任务被取消，正常退出
                 break;
             }
             catch (Exception)
             {
-                // 其他异常，退出循环
                 break;
             }
         }

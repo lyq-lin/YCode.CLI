@@ -1,8 +1,9 @@
-﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
 
 namespace YCode.CLI
 {
+    [Inject]
     internal class McpManager
     {
         private readonly string _workdir;
@@ -13,6 +14,10 @@ namespace YCode.CLI
             _tools = [];
 
             _workdir = workdir;
+        }
+
+        public McpManager(AppConfig config) : this(config.WorkDir)
+        {
         }
 
         public async Task<AITool[]> Regist(params (Delegate @delegate, string? name, string? description)[] methods)
@@ -96,3 +101,7 @@ namespace YCode.CLI
         }
     }
 }
+
+
+
+

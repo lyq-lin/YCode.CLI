@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 
 namespace YCode.CLI
 {
+    [Inject]
     internal class MemoryManager
     {
         private const int DailyRetentionDays = 30;
@@ -37,6 +38,10 @@ namespace YCode.CLI
             Directory.CreateDirectory(_dailyDir);
             Directory.CreateDirectory(_notesDir);
             Directory.CreateDirectory(_projectsDir);
+        }
+
+        public MemoryManager(AppConfig config) : this(config.WorkDir)
+        {
         }
 
         public string AddMemory(string category, string content, string? date, List<string>? tags, string? project = null)
@@ -590,3 +595,7 @@ namespace YCode.CLI
         public List<string>? Tags { get; set; } = [];
     }
 }
+
+
+
+

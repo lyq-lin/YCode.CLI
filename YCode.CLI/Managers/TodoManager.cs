@@ -1,5 +1,6 @@
-﻿namespace YCode.CLI
+namespace YCode.CLI
 {
+    [Inject]
     internal class TodoManager
     {
         private List<Dictionary<string, string>> _items = [];
@@ -23,22 +24,16 @@
 
                 if (raw == null)
                     throw new ArgumentException("Each todo must be an object");
-
-                // 处理ID
                 string todoId = (raw.ContainsKey("id") ? raw["id"]?.ToString() : null) ?? (i + 1).ToString();
 
                 if (seenIds.Contains(todoId))
                     throw new ArgumentException($"Duplicate todo id: {todoId}");
 
                 seenIds.Add(todoId);
-
-                // 验证内容
                 string content = (raw.ContainsKey("content") ? raw["content"]?.ToString() : "")?.Trim() ?? "";
 
                 if (string.IsNullOrEmpty(content))
                     throw new ArgumentException("Todo content cannot be empty");
-
-                // 验证状态
                 string status = (raw.ContainsKey("status") ? raw["status"]?.ToString() : TODO_STATUSES[0])?.ToLower() ?? TODO_STATUSES[0];
 
                 if (!TODO_STATUSES.Contains(status))
@@ -46,14 +41,10 @@
 
                 if (status == "in_progress")
                     inProgressCount++;
-
-                // 验证activeForm
                 string activeForm = (raw.ContainsKey("activeForm") ? raw["activeForm"]?.ToString() : "")?.Trim() ?? "";
 
                 if (string.IsNullOrEmpty(activeForm))
                     throw new ArgumentException("Todo activeForm cannot be empty");
-
-                // 创建清理后的任务项
                 var cleanedItem = new Dictionary<string, string>
                 {
                     ["id"] = todoId,
@@ -63,17 +54,11 @@
                 };
 
                 cleaned.Add(cleanedItem);
-
-                // 数量限制
                 if (cleaned.Count > 20)
                     throw new ArgumentException("Todo list is limited to 20 items in the demo");
             }
-
-            // 进行中任务约束
             if (inProgressCount > 1)
                 throw new ArgumentException("Only one task can be in_progress at a time");
-
-            // 更新内部状态
             _items = cleaned;
 
             return Render();
@@ -111,8 +96,6 @@
             string text = $"{mark} {todo["content"]}";
 
             string status = todo["status"];
-
-            // 这里简化了颜色显示，实际使用时可以添加ANSI颜色
             if (status == "completed")
                 return $"✓ {todo["content"]}";
             if (status == "in_progress")
@@ -121,3 +104,7 @@
         }
     }
 }
+
+
+
+
