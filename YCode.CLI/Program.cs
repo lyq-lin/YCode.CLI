@@ -38,14 +38,6 @@ var agents = new Dictionary<string, JsonObject>()
     }
 };
 
-// Agent类型到图标和颜色的映射
-var agent_icons = new Dictionary<string, (string icon, string color)>()
-{
-    ["explore"] = ("🔍", "blue"),
-    ["code"] = ("💻", "green"),
-    ["plan"] = ("📋", "yellow")
-};
-
 var initial_reminder = $"""
     '<reminder source="system" topic="todos">'
     "System message: complex work should be tracked with the Todo tool. "
@@ -475,11 +467,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
         }).GetChatClient(model)
         .CreateAIAgent(sub_system, tools: sub_tools);
 
-    var (icon, color) = agent_icons.TryGetValue(agentType, out var agentIcon)
-        ? agentIcon
-        : ("🔧", "gray");
-
-    AnsiConsole.MarkupLine($"[dim]    [/][bold {color}]{icon} [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)}");
+    AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]🤖 [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)}");
 
     var start = DateTime.Now;
 
@@ -506,7 +494,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
 
                             sub_tools_use.Add(result);
 
-                            AnsiConsole.MarkupLine($"[dim]    [/][bold {color}]{icon} [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} ... [dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/]");
+                            AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]🤖 [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} ... [dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/]");
                         }
                         break;
                 }
@@ -520,7 +508,7 @@ async Task<string> RunToTask(string description, string prompt, string agentType
 
     sub_messages.Add(new ChatMessage(ChatRole.Assistant, next));
 
-    AnsiConsole.MarkupLine($"[dim]    [/][bold {color}]✓ [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} - done ([dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/])");
+    AnsiConsole.MarkupLine($"[dim]    [/][bold cyan]✓ [[{EscapeMarkup(agentType)}]][/] {EscapeMarkup(description)} - done ([dim]{sub_tools_use.Count} tools, {(DateTime.Now - start).TotalSeconds:F1}s[/])");
 
     if (!String.IsNullOrWhiteSpace(next))
     {
