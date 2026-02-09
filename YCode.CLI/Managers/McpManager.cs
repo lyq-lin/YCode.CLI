@@ -24,13 +24,6 @@ namespace YCode.CLI
         {
             if (_tools.Count == 0)
             {
-                var filesystem = new StdioClientTransport(new StdioClientTransportOptions()
-                {
-                    Name = "filesystem",
-                    Command = "npx",
-                    Arguments = ["-y", "@modelcontextprotocol/server-filesystem", _workdir],
-                });
-
                 var bash = new StdioClientTransport(new StdioClientTransportOptions()
                 {
                     Name = "bash",
@@ -38,18 +31,9 @@ namespace YCode.CLI
                     Arguments = ["bash-mcp"],
                 });
 
-                var fileClient = await McpClient.CreateAsync(filesystem);
-
                 var bashClient = await McpClient.CreateAsync(bash);
 
-                var files = await fileClient.ListToolsAsync();
-
                 var bashes = await bashClient.ListToolsAsync();
-
-                if (files.Count > 0)
-                {
-                    _tools.TryAdd("file-system", [.. files]);
-                }
 
                 if (bashes.Count > 0)
                 {
