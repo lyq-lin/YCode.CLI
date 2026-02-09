@@ -72,7 +72,8 @@ var pending_context_blocks = new List<ChatMessage>()
 
 var agent_state = new Dictionary<string, int>()
 {
-    ["rounds_without_todo"] = 0
+    ["rounds_without_todo"] = 0,
+    ["total_rounds"] = 0
 };
 
 var todo = new TodoManager();
@@ -81,32 +82,57 @@ var mcp = new McpManager(workDir);
 
 var skills = new SkillsManager();
 
-var memory = new MemoryManager();
+var memory = new MemoryManager(workDir);
 
 var system = $"""
-    "You are a coding agent operating INSIDE the user's repository at {workDir}.\n"
-    "Follow this loop strictly: plan briefly → use TOOLS to act directly on files/shell → report concise results.\n"
-    "Rules:\n"
-    "- Prefer taking actions with tools (read/write/edit/bash) over long prose.\n"
-    "- Keep outputs terse. Use bullet lists / checklists when summarizing.\n"
-    "- Use Skill tool IMMEDIATELY when a task matches a skill description.\n"
-    "- Use Task tool for subtasks that need focused exploration or implementation.\n"
-    "- Never invent file paths. Ask via reads or list directories first if unsure.\n"
-    "- For edits, apply the smallest change that satisfies the request.\n"
-    "- For bash, avoid destructive or privileged commands; stay inside the workspace.\n"
-    "- Use the Todo tool to maintain multi-step plans when needed.\n"
-    "- After finishing, summarize what changed and how to run or test."
+    You are **YCode**, a senior coding agent operating INSIDE the user's repository at: {workDir}
 
-    "Task:\n"
+    ## Core operating mode (ReAct)
+    Use this loop on every turn:
+    1) **Reason**: quickly classify intent, risk, and missing facts.
+    2) **Act**: call the best tool/subAgent/skill immediately.
+    3) **Observe**: verify tool output, then choose next action.
+    4) **Respond**: return concise results + next-step checks.
+
+    Keep reasoning internal. Do not expose long chain-of-thought. Output only concise decisions and results.
+
+    ## Tool-routing policy (must be precise)
+    - File/system inspection or execution -> MCP tools (`read_file`, `run`, etc.).
+    - Multi-step work -> `TodoWriter` (keep exactly one `in_progress`).
+    - Save durable memory -> `MemoryWriter`:
+      - `profile`: stable user preferences/habits.
+      - `daily`: today's transient context.
+      - `project`: repository-specific conventions/decisions.
+    - Retrieve past memory -> `MemorySearch` before asking repeated questions.
+    - Need focused deep work -> `Task` subAgent:
+      - `explore`: read-only search/analysis.
+      - `plan`: architecture/step design.
+      - `code`: implementation/refactor/fix.
+    - Domain-specific methodology -> `Skill` immediately when matched.
+
+    ## Memory discipline
+    - Prefer storing high-value facts only (constraints, decisions, preferences, pitfalls).
+    - Deduplicate before writing memory; keep memory atomic and searchable.
+    - When user mentions long-term preference, persist it to `profile`.
+    - When a project rule is stated, persist it to `project`.
+
+    ## Execution rules
+    - Never invent file paths; discover first.
+    - Apply minimal safe edits.
+    - Avoid destructive/privileged shell operations.
+    - Keep answers short, structured, and test-oriented.
+
+    ## Available subAgents
     {GetAgentDescription()}
 
-    "Skills available (invoke with Skill tool when task matches):\n"
+    ## Available skills
     {skills.GetDescription()}
 """;
 
 var tools = await mcp.Regist(
     (RunTodoUpdate, "TodoWriter", null),
     (RunMemoryUpdate, "MemoryWriter", null),
+    (RunMemorySearch, "MemorySearch", null),
     (RunToTask, "Task", $$"""
     {
        "name": "Task", 
@@ -291,6 +317,8 @@ while (true)
     }
 
     agent_state["rounds_without_todo"] += 1;
+    agent_state["total_rounds"] += 1;
+    memory.MaybeSaveHeartbeat(input, agent_state["total_rounds"]);
 
     if (agent_state["rounds_without_todo"] > 10)
     {
@@ -355,29 +383,58 @@ string RunTodoUpdate(List<Dictionary<string, object>> items)
 [Description("""
     {
         "name": "MemoryWriter",
-        "description": "Save long-term memory items (profile or daily).",
+        "description": "Save long-term memory items (profile, daily, or project).",
         "arguments": {
             "type": "object",
             "properties": {
-                "category": { "type": "string", "enum": ["profile", "daily"] },
+                "category": { "type": "string", "enum": ["profile", "daily", "project"] },
                 "content": { "type": "string" },
                 "date": { "type": "string", "description": "YYYY-MM-DD for daily memory (optional)" },
-                "tags": { "type": "array", "items": { "type": "string" } }
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "project": { "type": "string", "description": "Project key for project memory (optional, defaults to current workspace name)" }
             },
             "required": ["category", "content"],
             "additionalProperties": false
         }
     }
     """)]
-string RunMemoryUpdate(string category, string content, string? date = null, List<string>? tags = null)
+string RunMemoryUpdate(string category, string content, string? date = null, List<string>? tags = null, string? project = null)
 {
     try
     {
-        return memory.AddMemory(category, content, date, tags);
+        return memory.AddMemory(category, content, date, tags, project);
     }
     catch (Exception ex)
     {
         return $"Error updating memory: {ex.Message}";
+    }
+}
+
+
+[Description("""
+    {
+        "name": "MemorySearch",
+        "description": "Search memories across profile, daily, and project scopes.",
+        "arguments": {
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 30 }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        }
+    }
+    """)]
+string RunMemorySearch(string query, int limit = 8)
+{
+    try
+    {
+        return memory.Search(query, limit);
+    }
+    catch (Exception ex)
+    {
+        return $"Error searching memory: {ex.Message}";
     }
 }
 
@@ -788,4 +845,3 @@ public class Spinner : IDisposable
 }
 
 #endregion
-
