@@ -6,9 +6,24 @@ namespace YCode.CLI
     {
         public static IServiceProvider Register(this IServiceCollection services)
         {
-            var key = Environment.GetEnvironmentVariable("YCODE_AUTH_TOKEN")!;
-            var uri = Environment.GetEnvironmentVariable("YCODE_API_BASE_URI")!;
-            var model = Environment.GetEnvironmentVariable("YCODE_MODEL")!;
+            // Register ConfigManager first to ensure it's available
+            services.AddSingleton<ConfigManager>();
+
+            // Build a temporary provider to get ConfigManager
+            var tempProvider = services.BuildServiceProvider();
+            var configManager = tempProvider.GetRequiredService<ConfigManager>();
+
+            // Ensure configuration is set up
+            configManager.EnsureConfiguration();
+
+            // Get configuration values from ConfigManager
+            var key = configManager.GetEnvironmentVariable("YCODE_AUTH_TOKEN")
+                      ?? throw new InvalidOperationException("YCODE_AUTH_TOKEN is required but not configured");
+            var uri = configManager.GetEnvironmentVariable("YCODE_API_BASE_URI")
+                      ?? throw new InvalidOperationException("YCODE_API_BASE_URI is required but not configured");
+            var model = configManager.GetEnvironmentVariable("YCODE_MODEL")
+                      ?? throw new InvalidOperationException("YCODE_MODEL is required but not configured");
+
             var workDir = Directory.GetCurrentDirectory();
             var osDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
             var osPlatform = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
